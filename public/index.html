@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agentforce Voice Demo</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img class="af-logo" src="/assets/astro.png" alt="Astro" width="40" height="40" />
+      <div class="brand-name">Agentforce Voice Demo</div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ------- Customization panel ------- -->
+    <section class="panel">
+      <h2>Customize for your customer</h2>
+      <p class="hint">Pick a starting profile, tweak anything, then press call. Each call spins up a
+        fresh voice agent with these settings.</p>
+
+      <label>Industry profile
+        <select id="profile"></select>
+      </label>
+
+      <label>Company name
+        <input id="companyName" type="text" placeholder="Northwind Energy" />
+      </label>
+
+      <label>Agent name &amp; greeting (first thing the caller hears)
+        <textarea id="firstMessage" rows="2"></textarea>
+      </label>
+
+      <label>Voice
+        <select id="voiceId"></select>
+      </label>
+
+      <label>Persona &amp; instructions (system prompt)
+        <textarea id="systemPrompt" rows="10"></textarea>
+      </label>
+
+      <label class="row">
+        <input id="useClaude" type="checkbox" />
+        <span>Use Claude as the brain <em id="claudeNote">(needs Anthropic key + public URL)</em></span>
+      </label>
+    </section>
+
+    <!-- ------- Phone mock ------- -->
+    <section class="stage">
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="call-company" id="screenCompany">Northwind Energy</div>
+          <div class="call-sub" id="screenSub">mobile · Agentforce Voice</div>
+
+          <div class="orb" id="orb">
+            <div class="orb-glow"></div>
+            <div class="orb-core">
+              <span class="blob b1"></span>
+              <span class="blob b2"></span>
+              <span class="blob b3"></span>
+            </div>
+            <div class="orb-ring rr1"></div>
+            <div class="orb-ring rr2"></div>
+          </div>
+
+          <div class="call-state" id="callState">Ready to call</div>
+          <div class="timer" id="timer">00:00</div>
+
+          <div class="transcript" id="transcript"></div>
+
+          <div class="controls">
+            <button id="callBtn" class="call">Call</button>
+            <button id="hangBtn" class="hang" disabled>End</button>
+          </div>
+        </div>
+      </div>
+      <p class="tip">Tip: allow microphone access when prompted. Speak naturally — no "press 1" menus.</p>
+    </section>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

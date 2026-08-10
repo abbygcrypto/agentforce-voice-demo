@@ -1,0 +1,168 @@
+:root {
+  --sf-blue: #0d9dda;
+  --sf-navy: #032d60;
+  --sf-ink: #16325c;
+  --bg: #f3f6fb;
+  --panel: #ffffff;
+  --line: #e2e8f2;
+  --ok: #2e844a;
+  --off: #ea001e;
+
+  /* Per-industry theme (overridden on <body data-theme>). */
+  --accent: #0d9dda;
+  --accent-2: #7b5cff;
+  --screen-1: #10406b;
+  --screen-2: #062a4d;
+  --screen-3: #041d3d;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--sf-ink);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 22px;
+  background: linear-gradient(90deg, var(--sf-navy), var(--sf-blue));
+  color: #fff;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.af-logo {
+  width: 40px; height: 40px; object-fit: contain;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.3));
+}
+.brand-name { font-weight: 700; font-size: 18px; letter-spacing: 0.2px; }
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(340px, 460px) 1fr;
+  gap: 28px;
+  padding: 28px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 22px;
+}
+.panel h2 { margin: 0 0 4px; font-size: 18px; }
+.hint { margin: 0 0 18px; font-size: 13px; color: #5a6b85; }
+
+label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+label.row { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+label.row em { color: #8494ad; font-style: normal; font-size: 12px; }
+input[type="text"], textarea, select {
+  width: 100%; margin-top: 6px; padding: 9px 11px;
+  border: 1px solid var(--line); border-radius: 8px;
+  font: inherit; font-weight: 400; color: var(--sf-ink); background: #fff;
+}
+textarea { resize: vertical; line-height: 1.4; }
+label.row input { width: auto; margin: 0; }
+
+.stage { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.tip { font-size: 12px; color: #5a6b85; text-align: center; }
+
+/* Phone */
+.phone {
+  width: 320px; height: 650px;
+  background: #0b0f17; border-radius: 46px;
+  padding: 14px; box-shadow: 0 30px 60px rgba(3,45,96,0.28);
+  position: relative;
+}
+.notch {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  width: 130px; height: 26px; background: #0b0f17; border-radius: 0 0 16px 16px; z-index: 3;
+}
+.screen {
+  width: 100%; height: 100%; border-radius: 34px;
+  background: radial-gradient(120% 90% at 50% 0%, var(--screen-1) 0%, var(--screen-2) 55%, var(--screen-3) 100%);
+  color: #fff; display: flex; flex-direction: column; align-items: center;
+  padding: 54px 20px 26px; text-align: center;
+  transition: background 0.6s ease;
+}
+.call-company { font-size: 22px; font-weight: 700; }
+.call-sub { font-size: 12px; opacity: 0.7; margin-top: 2px; }
+
+/* ---- ElevenLabs-style animated orb ---- */
+.orb {
+  position: relative;
+  width: 168px; height: 168px;
+  margin: 26px 0 12px;
+  display: grid; place-items: center;
+}
+.orb-glow {
+  position: absolute; inset: 6px; border-radius: 50%;
+  background: radial-gradient(circle at 50% 40%, var(--accent) 0%, var(--accent-2) 60%, transparent 72%);
+  filter: blur(14px); opacity: 0.55;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.orb-core {
+  position: relative; width: 118px; height: 118px; border-radius: 50%;
+  overflow: hidden;
+  background: radial-gradient(circle at 35% 30%, #ffffff22, transparent 45%),
+              linear-gradient(150deg, var(--accent), var(--accent-2));
+  box-shadow: inset 0 0 26px rgba(255,255,255,0.35), 0 8px 26px rgba(0,0,0,0.35);
+}
+/* Liquid blobs drifting inside the core. */
+.blob {
+  position: absolute; border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.85), rgba(255,255,255,0) 70%);
+  mix-blend-mode: screen; opacity: 0.7;
+}
+.b1 { width: 70px; height: 70px; top: 12%; left: 8%; animation: drift1 6s ease-in-out infinite; }
+.b2 { width: 60px; height: 60px; bottom: 6%; right: 10%; animation: drift2 7s ease-in-out infinite; }
+.b3 { width: 46px; height: 46px; top: 40%; left: 42%; background: radial-gradient(circle, var(--accent-2), transparent 70%); animation: drift3 5s ease-in-out infinite; }
+@keyframes drift1 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(14px,10px) scale(1.15)} }
+@keyframes drift2 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(-12px,-14px) scale(1.2)} }
+@keyframes drift3 { 0%,100%{transform:translate(0,0) scale(0.9)} 50%{transform:translate(-8px,10px) scale(1.1)} }
+
+.orb-ring {
+  position: absolute; border-radius: 50%; border: 2px solid var(--accent);
+  inset: 22px; opacity: 0;
+}
+
+/* Idle: gentle breathing. Speaking: strong pulse rings + brighter glow.
+   Listening: soft steady glow ring. */
+.orb-core { animation: breathe 4s ease-in-out infinite; }
+@keyframes breathe { 0%,100%{transform:scale(1)} 50%{transform:scale(1.04)} }
+
+.orb.speaking .orb-core { animation: speak 0.7s ease-in-out infinite; }
+@keyframes speak { 0%,100%{transform:scale(1)} 50%{transform:scale(1.12)} }
+.orb.speaking .orb-glow { opacity: 0.9; transform: scale(1.08); }
+.orb.speaking .orb-ring { animation: ping 1.4s ease-out infinite; }
+.orb.speaking .rr2 { animation-delay: 0.7s; }
+@keyframes ping { 0%{transform:scale(0.7);opacity:0.8} 100%{transform:scale(1.5);opacity:0} }
+
+.orb.listening .orb-glow { opacity: 0.8; }
+.orb.listening .orb-core { box-shadow: inset 0 0 26px rgba(255,255,255,0.35), 0 0 0 5px rgba(255,255,255,0.18), 0 8px 26px rgba(0,0,0,0.35); }
+
+.call-state { font-size: 14px; letter-spacing: 0.3px; opacity: 0.9; margin-top: 6px; }
+.timer { font-size: 13px; opacity: 0.6; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+.transcript {
+  flex: 1; width: 100%; margin: 14px 0; overflow-y: auto;
+  font-size: 12.5px; text-align: left; display: flex; flex-direction: column; gap: 6px;
+}
+.transcript .msg { padding: 7px 10px; border-radius: 12px; max-width: 85%; line-height: 1.35; }
+.transcript .agent { background: rgba(255,255,255,0.14); align-self: flex-start; border-bottom-left-radius: 4px; }
+.transcript .user { background: var(--accent); color: #04223d; align-self: flex-end; border-bottom-right-radius: 4px; }
+
+.controls { display: flex; gap: 16px; margin-top: auto; }
+.controls button {
+  border: none; border-radius: 999px; padding: 14px 30px;
+  font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.controls .call { background: var(--ok); color: #fff; }
+.controls .hang { background: var(--off); color: #fff; }
+.controls button:disabled { opacity: 0.4; cursor: not-allowed; }
