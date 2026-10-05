@@ -71,6 +71,12 @@ header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; backg
 .row > .field { flex: 1 1 120px; }
 input[type="number"], input[type="text"], input[type="time"], select, textarea { width: 100%; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; }
 textarea { resize: vertical; min-height: 64px; }
+textarea.journal { min-height: 160px; line-height: 1.55; font-size: 1rem; }
+.entries { display: grid; gap: 12px; }
+.entry { display: grid; gap: 4px; padding-block: 12px; border-top: 1px solid var(--line); }
+.entry:first-child { border-top: 0; padding-top: 0; }
+.entry .when { font-size: .8rem; color: var(--muted); }
+.entry p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .hm { display: flex; align-items: center; gap: 6px; }
 .hm input { width: 72px; }
 .hm span { color: var(--muted); font-size: .9rem; }
@@ -261,7 +267,7 @@ function blank(date) {
   return {
     date,
     sleep: { hours: null, quality: null, bed: '', wake: '' },
-    feel: { mood: null, energy: null, focus: null, anxiety: null, meds: null, note: '' },
+    feel: { journal: '', mood: null, energy: null, focus: null, anxiety: null, meds: null, note: '' },
     food: { plan: null, water: null, bowel: null, cravings: null },
     workout: { type: '', session: null, minutes: null, effort: null, steps: null, lifts: [] },
     body: { weight: null, waist: null, hips: null, flow: null, symptoms: [] }
@@ -285,7 +291,7 @@ const U = () => S.prefs.unit;
 const isWorkout = d => d && d.workout.type && d.workout.type !== 'rest';
 const done = d => ({
   Sleep: d.sleep.hours != null,
-  Feelings: d.feel.mood != null || d.feel.energy != null || d.feel.focus != null,
+  Feelings: !!(d.feel.journal || '').trim(),
   Nutrition: d.food.plan != null || d.food.water != null || d.food.bowel != null,
   Training: !!d.workout.type,
   Body: d.body.weight != null || !!d.body.flow || d.body.symptoms.length > 0
@@ -429,11 +435,8 @@ function renderToday() {
   </fieldset>
 
   <fieldset class="card" id="c-feel" ${dis} style="margin:0">
-    <div class="card-head"><h3>How you feel</h3><p class="hint">Tap a number. Skip any that don't apply.</p></div>
-    ${scale('feel.energy', d.feel.energy, 'Energy')}
-    ${scale('feel.mood', d.feel.mood, 'Mood')}
-    ${scale('feel.focus', d.feel.focus, 'Focus')}
-    ${scale('feel.anxiety', d.feel.anxiety, 'Anxiety')}
+    <div class="card-head"><h3>How you feel</h3><p class="hint">In your own words. As much or as little as you like.</p></div>
+    <textarea id="in-journal" class="journal" data-k="feel.journal" data-type="str" aria-label="How you feel today" placeholder="How's your body, your head, your energy? Anything on your mind?">${esc(d.feel.journal)}</textarea>
     <div class="field"><span class="lbl">ADHD meds</span>${chipRow('feel.meds', d.feel.meds, [['yes', 'Taken'], ['late', 'Taken late'], ['no', 'Skipped'], ['none', 'Not on meds']])}</div>
   </fieldset>
 
@@ -750,11 +753,6 @@ function heatmap(id, dates) {
   el.innerHTML = s + '</svg>';
 }
 
-function compare(dates, split, metric) {
-  const a = [], b = [];
-  dates.forEach(dt => { const d = getDay(dt); if (!d) return; const m = metric(d), g = split(d); if (m == null || g == null) return; (g ? a : b).push(m); });
-  return { a: avg(a), b: avg(b), na: a.length, nb: b.length, ok: a.length >= 3 && b.length >= 3 };
-}
 const signed = (v, unit = '') => (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(r1(v)) + unit;
 function rolling(dates, f, win = 7) {
   return dates.map(dt => { const vs = []; for (let k = 0; k < win; k++) { const d = getDay(addDays(dt, -k)); const v = d ? f(d) : null; if (v != null) vs.push(v); } return vs.length ? avg(vs) : null; });
@@ -775,15 +773,20 @@ function renderTrends() {
   const wFirst = wAvg.find(v => v != null), wLast = [...wAvg].reverse().find(v => v != null);
   const sl = dates.map(dt => getDay(dt)?.sleep.hours).filter(v => v != null);
   const short7 = sl.filter(v => v < 7).length;
-  const i1 = compare(dates, d => !!isWorkout(d), d => d.feel.energy);
-  const i2 = compare(dates, d => d.sleep.hours == null ? null : d.sleep.hours >= p.sleep - 1, d => d.feel.focus);
+  const entries = dates.slice().reverse().map(getDay).filter(d => d && (d.feel.journal || '').trim());
+  const context = d => {
+    const b = [];
+    if (d.sleep.hours != null) b.push(fmtHM(d.sleep.hours) + ' sleep');
+    if (d.workout.type) { const sess = d.workout.session && S.program ? (S.program.days.find(x => x.id === d.workout.session) || {}).name : ''; b.push(sess || (WORKOUTS.find(x => x[0] === d.workout.type) || [, d.workout.type])[1]); }
+    if (d.body.flow) b.push('period');
+    if (d.body.symptoms.length) b.push(d.body.symptoms.join(', ').toLowerCase());
+    return b.join(' · ');
+  };
   const tile = (k, ok, v, text, need) => `<div class="insight"><span class="k">${k}</span>${ok ? `<span class="v num">${v}</span><p>${text}</p>` : `<span class="v" style="color:var(--muted)">–</span><p>${need}</p>`}</div>`;
   const insights = `<div class="insights">
     ${tile('Lifts going up', prog.length > 0, `${up.length} of ${prog.length}`, `exercises are heavier than the first time you logged them.${best && best.d > 0 ? ` Biggest jump: ${esc(best.n)}, ${fromKg(best.first.weight)} → ${fromKg(best.last.weight)} ${u}.` : ''}`, 'Log an exercise twice to see it here.')}
     ${tile('Weight, 7-day average', wFirst != null && wLast != null && wAvg.filter(v => v != null).length > 3, wLast != null && wFirst != null ? signed(+fromKg(wLast) - +fromKg(wFirst), ' ' + u) : '', `From ${fromKg(r1(wFirst || 0))} to ${fromKg(r1(wLast || 0))} ${u} over ${S.range} days. On a recomp, a steady scale while lifts climb still means progress.`, 'Weigh in on a few mornings to see the trend.')}
     ${tile('Sleep', sl.length >= 3, fmtHM(avg(sl)), `Average a night across ${sl.length} logged nights. ${short7} ${short7 === 1 ? 'was' : 'were'} under 7 hours.`, 'Log sleep on 3+ nights.')}
-    ${tile('Energy · training days', i1.ok, signed(i1.a - i1.b), `Energy averages ${r1(i1.a)} on training days and ${r1(i1.b)} on other days.`, 'Rate your energy on 3+ training days and 3+ other days to compare.')}
-    ${tile(`Focus · ${p.sleep - 1}h+ sleep`, i2.ok, signed(i2.a - i2.b), `Focus averages ${r1(i2.a)} after ${p.sleep - 1}h+ of sleep and ${r1(i2.b)} after less.`, `Rate focus on 3+ days after ${p.sleep - 1}h+ of sleep and 3+ after less.`)}
   </div><p class="footnote" style="margin:-4px 0 16px">These are patterns in your own log, not proof of cause. They get more reliable over a few weeks.</p>`;
 
   const lifts = exerciseNames().filter(n => history(n).length);
@@ -807,9 +810,8 @@ function renderTrends() {
     <section class="card"><div class="card-head"><h3>Training</h3><p class="hint">Darker = strength · dashed outline = rest day</p></div>
       <div class="chart" id="ch-heat"></div>
       <div class="legend"><span><i class="box" style="background:var(--seq1)"></i>Walk / yoga</span><span><i class="box" style="background:var(--seq2)"></i>Cardio</span><span><i class="box" style="background:var(--seq3)"></i>HIIT</span><span><i class="box" style="background:var(--seq4)"></i>Strength</span></div></section>
-    <section class="card"><div class="card-head"><h3>How you felt</h3><p class="hint">1–5 scale · pink ticks are period days</p></div>
-      <div class="legend"><span><i style="background:var(--s1)"></i>Energy</span><span><i style="background:var(--s2)"></i>Mood</span><span><i style="background:var(--s3)"></i>Focus</span><span><i class="box" style="background:var(--period);height:6px"></i>Period</span></div>
-      <div class="chart" id="ch-feel"></div></section>
+    <section class="card"><div class="card-head"><h3>How you felt</h3><p class="hint">Your words, newest first, with what else was going on that day</p></div>
+      ${entries.length ? `<div class="entries">${entries.map(d => `<div class="entry"><span class="when"><b>${esc(fmtDay(d.date))}</b>${context(d) ? ' · ' + esc(context(d)) : ''}</span><p>${esc(d.feel.journal.trim())}</p></div>`).join('')}</div>` : '<p class="empty">Write how you feel on the Log tab and your entries collect here next to your sleep, training and cycle.</p>'}</section>
     <section class="card"><div class="card-head"><h3>Water</h3><p class="hint">Litres · dashed line is your ${p.water} L target</p></div><div class="chart" id="ch-water"></div></section>
     <section class="card"><div class="card-head"><h3>Symptoms</h3><p class="hint">Days with each symptom, out of ${symDays} logged</p></div>
       ${symList.length ? `<div class="hbars">${symList.map(([k, v]) => `<div class="hbar" data-tip="<b>${esc(k)}</b><br>${v} of ${symDays} logged days"><span>${esc(k)}</span><div class="track"><i style="width:${v / symMax * 100}%"></i></div><span class="num">${v}</span></div>`).join('')}</div>` : '<p class="empty">No symptoms logged in this range.</p>'}</section>
@@ -838,12 +840,6 @@ function renderTrends() {
   timeChart('ch-sleep', dates, [{ name: 'Asleep', kind: 'bar', color: col('--s1'), vals: sv }],
     { min: 0, max: Math.max(12, ...sv.filter(v => v != null)), ticks: [0, 4, 8, 12], target: p.sleep, label: 'Hours asleep by night', fmt: v => fmtHM(v), tickFmt: t => t + 'h', empty: 'Log sleep on the Log tab to see it here.' });
   heatmap('ch-heat', dates);
-  timeChart('ch-feel', dates, [
-    { name: 'Energy', color: col('--s1'), vals: series(d => d.feel.energy) },
-    { name: 'Mood', color: col('--s2'), vals: series(d => d.feel.mood) },
-    { name: 'Focus', color: col('--s3'), vals: series(d => d.feel.focus) }
-  ], { min: 1, max: 5, ticks: [1, 2, 3, 4, 5], label: 'Energy, mood and focus by day', h: 200, band: { vals: series(d => !!d.body.flow) }, empty: 'Rate energy, mood and focus on the Log tab. A few taps a day is enough to see patterns here.',
-    extraTip: i => { const d = getDay(dates[i]); return d && d.body.flow ? `<br>Period: ${esc(d.body.flow)}` : ''; } });
   timeChart('ch-water', dates, [{ name: 'Water', kind: 'bar', color: col('--s1'), vals: series(d => d.food.water) }],
     { min: 0, max: 4, ticks: [0, 2, 4], target: p.water, label: 'Water litres by day', fmt: v => v + ' L', tickFmt: t => t + 'L', empty: 'Log water on the Log tab to see it here.' });
   const sel = $('#liftSel'); if (sel) sel.onchange = () => { S.lift = sel.value; renderTrends(); };
@@ -863,14 +859,13 @@ function summary(d) {
   }
   if (d.food.plan === 'off') bits.push('off-plan meal'); if (d.food.plan === 'skipped') bits.push('skipped a meal');
   if (d.body.flow) bits.push('period');
-  if (d.feel.energy != null) bits.push('energy ' + d.feel.energy);
   return bits.join(' · ') || 'Started, nothing filled in';
 }
 function renderHistory() {
   const ks = Object.keys(S.days).sort().reverse(), p = S.prefs;
   $('#histBody').innerHTML = `
     <div class="datebar"><h2>History</h2><span class="hint">${ks.length} days logged</span></div>
-    <div class="days">${ks.length ? ks.map(k => { const d = getDay(k); return `<button class="day" data-day="${k}"><span class="d">${esc(fmtDay(k, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }))}</span><span class="s">${esc(summary(d))}</span>${d.feel.note ? `<span class="s">“${esc(d.feel.note)}”</span>` : ''}</button>`; }).join('') : '<div class="card"><p class="empty">Nothing logged yet. Your days will collect here.</p></div>'}</div>
+    <div class="days">${ks.length ? ks.map(k => { const d = getDay(k); return `<button class="day" data-day="${k}"><span class="d">${esc(fmtDay(k, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }))}</span><span class="s">${esc(summary(d))}</span>${d.feel.journal ? `<span class="s">${esc(d.feel.journal.length > 140 ? d.feel.journal.slice(0, 140) + '…' : d.feel.journal)}</span>` : ''}${d.feel.note ? `<span class="s">Tomorrow: ${esc(d.feel.note)}</span>` : ''}</button>`; }).join('') : '<div class="card"><p class="empty">Nothing logged yet. Your days will collect here.</p></div>'}</div>
     <section class="card" style="margin-top:22px"><div class="card-head"><h3>Targets &amp; units</h3><p class="hint">Saved for every device</p></div>
       <div class="row">
         <div class="field"><span class="lbl">Weight unit</span><div class="chips">${[['kg', 'kg'], ['lb', 'lb']].map(([v, l]) => `<button class="chip" data-unit="${v}" aria-pressed="${p.unit === v}">${l}</button>`).join('')}</div></div>
@@ -895,11 +890,11 @@ $('#histBody').addEventListener('click', e => {
   if (t.id === 'csv') exportCsv();
 });
 async function exportCsv() {
-  const cols = ['date', 'weight_' + U(), 'waist_cm', 'hips_cm', 'sleep_hours', 'sleep_quality', 'bedtime', 'woke', 'water_l', 'meal_plan', 'bowel', 'cravings', 'improve_tomorrow', 'energy', 'mood', 'focus', 'anxiety', 'adhd_meds', 'training', 'session', 'minutes', 'rpe', 'steps', 'lifts', 'period', 'symptoms'];
+  const cols = ['date', 'weight_' + U(), 'waist_cm', 'hips_cm', 'sleep_hours', 'sleep_quality', 'bedtime', 'woke', 'water_l', 'meal_plan', 'bowel', 'cravings', 'improve_tomorrow', 'how_i_feel', 'energy', 'mood', 'focus', 'anxiety', 'adhd_meds', 'training', 'session', 'minutes', 'rpe', 'steps', 'lifts', 'period', 'symptoms'];
   const q = v => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const rows = Object.keys(S.days).sort().map(k => {
     const d = getDay(k), sess = d.workout.session && S.program ? (S.program.days.find(x => x.id === d.workout.session) || {}).name : d.workout.session;
-    return [k, fromKg(d.body.weight), d.body.waist, d.body.hips, d.sleep.hours, d.sleep.quality, d.sleep.bed, d.sleep.wake, d.food.water, d.food.plan, d.food.bowel, d.food.cravings, d.feel.note, d.feel.energy, d.feel.mood, d.feel.focus, d.feel.anxiety, d.feel.meds, d.workout.type, sess, d.workout.minutes, d.workout.effort, d.workout.steps,
+    return [k, fromKg(d.body.weight), d.body.waist, d.body.hips, d.sleep.hours, d.sleep.quality, d.sleep.bed, d.sleep.wake, d.food.water, d.food.plan, d.food.bowel, d.food.cravings, d.feel.note, d.feel.journal, d.feel.energy, d.feel.mood, d.feel.focus, d.feel.anxiety, d.feel.meds, d.workout.type, sess, d.workout.minutes, d.workout.effort, d.workout.steps,
       d.workout.lifts.map(l => `${l.name} ${l.scheme || ''} @ ${fromKg(l.weight)}${U()}${l.note ? ' (' + l.note + ')' : ''}`).join('; '), d.body.flow, d.body.symptoms.join('; ')].map(q).join(',');
   });
   try { await S.dl.save({ filename: 'baseline-log-' + today() + '.csv', data: cols.join(',') + '\n' + rows.join('\n') }); }
