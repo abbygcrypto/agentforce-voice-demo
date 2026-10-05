@@ -142,6 +142,37 @@ textarea { resize: vertical; min-height: 64px; }
 #tip { position: fixed; z-index: 20; pointer-events: none; background: var(--ink); color: var(--bg); font-size: .8rem; padding: 7px 9px; border-radius: 8px; max-width: 240px; line-height: 1.4; }
 #tip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
 @media (prefers-reduced-motion: no-preference) { .chip, .pill, .tabs button { transition: background-color .15s, color .15s; } }
+
+/* Lifts on the Log tab */
+.lifts { display: grid; gap: 10px; }
+.liftrow { display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
+.liftrow .top { display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 6px; align-items: center; }
+.liftrow .nums { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.liftrow .nums > input { width: 92px; }
+.liftrow .nums .wt { width: 110px; }
+.liftrow input { padding: 7px 8px; background: var(--surface); }
+.liftrow .name { font-weight: 700; }
+.liftrow .meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: .82rem; color: var(--muted); }
+.liftrow .meta .btn { padding: 3px 9px; font-size: .8rem; }
+.liftrow .note { font-size: .88rem; }
+.delta { font-weight: 700; font-size: .8rem; padding: 1px 7px; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
+.delta.up { background: var(--accent-soft); color: var(--accent); }
+.wt { position: relative; }
+.wt input { padding-right: 30px; }
+.wt span { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: .78rem; color: var(--muted); pointer-events: none; }
+
+/* Program */
+.weekline { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; }
+.weekline b { font-family: var(--font-display); font-size: 1.15rem; }
+.exlist { display: grid; }
+.ex { display: grid; grid-template-columns: minmax(0, 1fr) auto 84px; gap: 4px 12px; align-items: center; padding-block: 9px; border-top: 1px solid var(--line); }
+.ex:first-child { border-top: 0; }
+.ex .n { font-weight: 700; min-width: 0; }
+.ex .n small { display: block; font-weight: 400; color: var(--muted); font-size: .8rem; }
+.ex .w { text-align: right; font-size: .9rem; white-space: nowrap; }
+.ex .w small { display: block; color: var(--muted); font-size: .76rem; }
+.ex svg { display: block; }
+.exedit { display: grid; grid-template-columns: minmax(0, 1fr) 120px 36px; gap: 6px; align-items: center; }
 </style>
 
 <div id="tip" hidden></div>
@@ -150,6 +181,7 @@ textarea { resize: vertical; min-height: 64px; }
     <div class="brand"><h1>Baseline<span>.</span></h1><span class="status" id="status" aria-live="polite">Connecting…</span></div>
     <div class="tabs" role="tablist">
       <button role="tab" id="tab-today" aria-selected="true" data-tab="today">Log</button>
+      <button role="tab" id="tab-program" aria-selected="false" data-tab="program">Program</button>
       <button role="tab" id="tab-trends" aria-selected="false" data-tab="trends">Trends</button>
       <button role="tab" id="tab-history" aria-selected="false" data-tab="history">History</button>
     </div>
@@ -169,6 +201,8 @@ textarea { resize: vertical; min-height: 64px; }
     <div class="stack" id="form"><div class="card"><p class="empty">Loading your log…</p></div></div>
   </section>
 
+  <section id="program" role="tabpanel" hidden><div id="progBody"></div></section>
+
   <section id="trends" role="tabpanel" hidden>
     <div class="range" id="range">
       <span class="lbl">Show</span>
@@ -179,11 +213,8 @@ textarea { resize: vertical; min-height: 64px; }
     <div id="trendBody"></div>
   </section>
 
-  <section id="history" role="tabpanel" hidden>
-    <div id="histBody"></div>
-  </section>
+  <section id="history" role="tabpanel" hidden><div id="histBody"></div></section>
 </main>
-
 <script>
 (() => {
 'use strict';
@@ -195,12 +226,16 @@ const pad2 = n => String(n).padStart(2, '0');
 const ymd = d => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
 const parse = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return ymd(d); };
+const diffDays = (a, b) => Math.round((parse(a) - parse(b)) / 864e5);
 const fmtDay = (s, o = { weekday: 'short', day: 'numeric', month: 'short' }) => parse(s).toLocaleDateString(undefined, o);
+const short = s => fmtDay(s, { day: 'numeric', month: 'short' });
 const today = () => ymd(new Date());
 const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
 const r1 = v => Math.round(v * 10) / 10;
+const r2 = v => Math.round(v * 100) / 100;
 const fmtHM = h => { if (h == null) return '–'; const m = Math.round(h * 60); return Math.floor(m / 60) + 'h ' + pad2(m % 60) + 'm'; };
 const uid = () => Math.random().toString(36).slice(2, 9);
+const key = n => String(n || '').trim().toLowerCase();
 const LB = 2.20462;
 
 const SCALES = {
@@ -209,12 +244,17 @@ const SCALES = {
 };
 const WORKOUTS = [['strength', 'Strength'], ['cardio', 'Cardio'], ['hiit', 'HIIT'], ['walk', 'Walk'], ['yoga', 'Yoga / Pilates'], ['rest', 'Rest day']];
 const FLOW = [['spotting', 'Spotting'], ['light', 'Light'], ['medium', 'Medium'], ['heavy', 'Heavy']];
-const SYMPTOMS = ['Bloating', 'Sugar cravings', 'Fatigue', 'Acne', 'Cramps', 'Brain fog', 'Headache', 'Hair shedding', 'Low mood', 'Restless'];
+const SYMPTOMS = ['Bloating', 'Sugar cravings', 'Very hungry', 'Fatigue', 'Acne', 'Cramps', 'Brain fog', 'Migraine', 'Joint pain', 'Hair shedding', 'Low mood', 'Restless'];
+const PLAN = [['on', 'On plan'], ['off', 'Off-plan meal'], ['skipped', 'Skipped a meal']];
+const BOWEL = [['normal', 'Normal'], ['loose', 'Loose'], ['constipated', 'Constipated'], ['none', 'None today']];
+const WATER = [1, 1.5, 2, 2.5, 3, 3.5, 4];
 
 const S = {
   db: null, dl: null, canWrite: true, loaded: false,
-  days: {}, prefs: { unit: 'kg', protein: 100, fibre: 25, water: 8, sleep: 8 },
-  cur: today(), draft: null, dirty: false, tab: 'today', range: 30, lift: null, armRemove: false
+  days: {}, prefs: { unit: 'kg', water: 3, sleep: 8, cycle: 31 },
+  program: null,
+  cur: today(), draft: null, dirty: false, tab: 'today', range: 30, lift: null,
+  armSession: null, editProg: false, armDelDay: null
 };
 
 function blank(date) {
@@ -222,38 +262,61 @@ function blank(date) {
     date,
     sleep: { hours: null, quality: null, bed: '', wake: '' },
     feel: { mood: null, energy: null, focus: null, anxiety: null, meds: null, note: '' },
-    food: { meals: [], water: 0, cravings: null },
-    workout: { type: '', minutes: null, effort: null, steps: null, lifts: [] },
-    body: { weight: null, flow: null, symptoms: [] }
+    food: { plan: null, water: null, bowel: null, cravings: null },
+    workout: { type: '', session: null, minutes: null, effort: null, steps: null, lifts: [] },
+    body: { weight: null, waist: null, hips: null, flow: null, symptoms: [] }
   };
 }
 function normalize(d, date) {
   const b = blank(date);
   if (!d) return b;
   for (const k of Object.keys(b)) if (b[k] && typeof b[k] === 'object') b[k] = { ...b[k], ...(d[k] || {}) };
+  delete b.food.meals;
   if (d.example) b.example = true;
   return clone(b);
 }
 const getDay = date => S.days[date] ? normalize(S.days[date], date) : null;
 
-// unit conversion — weights are stored in kg
-const toKg = v => v == null || v === '' || isNaN(v) ? null : r1(S.prefs.unit === 'lb' ? v / LB : +v);
-const fromKg = v => v == null ? '' : r1(S.prefs.unit === 'lb' ? v * LB : v);
+// weights are stored in kg; shown in the chosen unit
+const toKg = v => v == null || v === '' || isNaN(v) ? null : r2(S.prefs.unit === 'lb' ? v / LB : +v);
+const fromKg = v => v == null ? '' : (S.prefs.unit === 'lb' ? r1(v * LB) : r2(v));
 const U = () => S.prefs.unit;
 
-// derived per-day numbers
-const sum = (arr, f) => arr.reduce((t, m) => t + (+m[f] || 0), 0);
-const protein = d => d && d.food.meals.length ? sum(d.food.meals, 'protein') : null;
-const fibre = d => d && d.food.meals.length ? sum(d.food.meals, 'fibre') : null;
-const carbs = d => d && d.food.meals.length ? sum(d.food.meals, 'carbs') : null;
 const isWorkout = d => d && d.workout.type && d.workout.type !== 'rest';
 const done = d => ({
   Sleep: d.sleep.hours != null,
   Feelings: d.feel.mood != null || d.feel.energy != null || d.feel.focus != null,
-  Food: d.food.meals.length > 0,
-  Movement: !!d.workout.type,
+  Nutrition: d.food.plan != null || d.food.water != null || d.food.bowel != null,
+  Training: !!d.workout.type,
   Body: d.body.weight != null || !!d.body.flow || d.body.symptoms.length > 0
 });
+
+// lift history: every logged weight for an exercise name, oldest first
+function history(name, before) {
+  const k = key(name), out = [];
+  Object.keys(S.days).sort().forEach(dt => {
+    if (before && dt >= before) return;
+    (S.days[dt].workout?.lifts || []).forEach(l => { if (key(l.name) === k && l.weight != null) out.push({ date: dt, weight: l.weight, scheme: l.scheme, note: l.note }); });
+  });
+  return out;
+}
+const lastLift = (name, before) => { const h = history(name, before); return h.length ? h[h.length - 1] : null; };
+
+// cycle: period starts are flow days whose previous day has no flow
+function periodStarts(upTo) {
+  const flow = dt => dt === S.draft?.date ? !!S.draft.body.flow : !!S.days[dt]?.body?.flow;
+  const ks = new Set(Object.keys(S.days).filter(k => S.days[k].body?.flow));
+  if (S.draft) { S.draft.body.flow ? ks.add(S.draft.date) : ks.delete(S.draft.date); }
+  return [...ks].filter(k => k <= upTo && !flow(addDays(k, -1))).sort();
+}
+function cycleInfo(dt) {
+  const st = periodStarts(dt); if (!st.length) return null;
+  const last = st[st.length - 1];
+  const gaps = st.slice(1).map((s, i) => diffDays(s, st[i])).filter(g => g >= 20 && g <= 60);
+  const len = gaps.length ? Math.round(avg(gaps)) : S.prefs.cycle;
+  return { day: diffDays(dt, last) + 1, due: diffDays(addDays(last, len), dt), len, measured: gaps.length > 0 };
+}
+const dueText = c => c.due > 1 ? `due in about ${c.due} days` : c.due === 1 ? 'due tomorrow' : c.due === 0 ? 'due about today' : `${-c.due} days later than usual`;
 
 // ---------- status + saving ----------
 function setStatus(t, err) { const el = $('#status'); el.textContent = t; el.classList.toggle('err', !!err); }
@@ -282,80 +345,79 @@ function flush() {
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
 window.addEventListener('pagehide', flush);
 
-// ---------- Today ----------
-function loadDraft() { S.draft = getDay(S.cur) || blank(S.cur); }
+// ---------- Log ----------
+function loadDraft() { S.draft = getDay(S.cur) || blank(S.cur); S.armSession = null; }
 function goTo(date) { flush(); S.cur = date > today() ? today() : date; loadDraft(); renderToday(); }
 
-function chipRow(key, val, opts, cls = '') {
+function chipRow(k, val, opts, cls = '') {
   return '<div class="chips">' + opts.map(([v, l]) =>
-    `<button type="button" class="chip ${cls}" data-chip="${key}" data-v="${esc(v)}" aria-pressed="${String(val) === String(v)}">${esc(l)}</button>`).join('') + '</div>';
+    `<button type="button" class="chip ${cls}" data-chip="${k}" data-v="${esc(v)}" aria-pressed="${String(val) === String(v)}">${esc(l)}</button>`).join('') + '</div>';
 }
-function scale(key, val, label, n = 5) {
-  const [lo, hi] = SCALES[key] || ['Low', 'High'];
+function scale(k, val, label, n = 5) {
+  const [lo, hi] = SCALES[k] || ['Low', 'High'];
   const opts = Array.from({ length: n }, (_, i) => [i + 1, i + 1]);
-  return `<div class="field scale"><span class="lbl">${label}</span>${chipRow(key, val, opts)}<div class="ends"><span>${lo}</span><span>${hi}</span></div></div>`;
+  return `<div class="field scale"><span class="lbl">${label}</span>${chipRow(k, val, opts)}<div class="ends"><span>${lo}</span><span>${hi}</span></div></div>`;
 }
-const numIn = (key, val, attrs = '') => `<input type="number" inputmode="decimal" id="in-${key.replace('.', '-')}" data-k="${key}" value="${val ?? ''}" ${attrs}>`;
+const numIn = (k, val, attrs = '') => `<input type="number" inputmode="decimal" id="in-${k.replace('.', '-')}" data-k="${k}" value="${val ?? ''}" ${attrs}>`;
 
-function recentMeals() {
-  const counts = {};
-  Object.keys(S.days).sort().reverse().slice(0, 30).forEach(k => {
-    if (k === S.cur) return;
-    (S.days[k].food?.meals || []).forEach(m => {
-      const n = (m.name || '').trim(); if (!n) return;
-      const key = n.toLowerCase();
-      if (!counts[key]) counts[key] = { m, c: 0 };
-      counts[key].c++;
-    });
-  });
-  return Object.values(counts).sort((a, b) => b.c - a.c).slice(0, 8).map(x => x.m);
-}
 function exerciseNames() {
-  const s = new Set();
-  Object.values(S.days).forEach(d => (d.workout?.lifts || []).forEach(l => l.name && s.add(l.name.trim())));
-  return [...s].sort((a, b) => a.localeCompare(b));
+  const s = new Map();
+  (S.program?.days || []).forEach(d => d.exercises.forEach(e => e.name && s.set(key(e.name), e.name.trim())));
+  Object.values(S.days).forEach(d => (d.workout?.lifts || []).forEach(l => l.name && !s.has(key(l.name)) && s.set(key(l.name), l.name.trim())));
+  return [...s.values()].sort((a, b) => a.localeCompare(b));
 }
-function lastSession(type) {
-  const ks = Object.keys(S.days).filter(k => k < S.cur).sort().reverse();
-  for (const k of ks) {
-    const w = S.days[k].workout;
-    if (w && w.lifts && w.lifts.length && (!type || w.type === type)) return { date: k, w };
-  }
-  return null;
+function deltaBadge(l) {
+  const last = lastLift(l.name, S.cur);
+  if (!last || l.weight == null) return '';
+  const dlt = r2(l.weight - last.weight);
+  if (Math.abs(dlt) < 0.01) return '<span class="delta">Same as last</span>';
+  return `<span class="delta ${dlt > 0 ? 'up' : ''}">${dlt > 0 ? '↑ +' : '↓ '}${Math.abs(fromKg(Math.abs(dlt)))} ${U()}</span>`;
 }
-function daysSincePeriodStart() {
-  const ks = Object.keys(S.days).filter(k => k <= S.cur && S.days[k].body?.flow).sort();
-  if (S.draft.body.flow && !ks.includes(S.cur)) ks.push(S.cur);
-  if (!ks.length) return null;
-  // latest run start: walk back from the newest flow day while the previous calendar day also has flow
-  let start = ks[ks.length - 1];
-  while (ks.includes(addDays(start, -1))) start = addDays(start, -1);
-  return Math.round((parse(S.cur) - parse(start)) / 864e5) + 1;
+function lastText(l) {
+  const last = lastLift(l.name, S.cur);
+  return last ? `Last ${fromKg(last.weight)} ${U()} · ${esc(short(last.date))}` : (l.name ? 'First time logged' : '');
+}
+function liftRow(l, i) {
+  const u = U();
+  return `<div class="liftrow">
+    <div class="top">
+      <input type="text" class="name" list="exnames" id="l-${l.id}-n" data-list="lifts" data-i="${i}" data-f="name" value="${esc(l.name)}" placeholder="Exercise" aria-label="Exercise">
+      <button type="button" class="del" data-act="delLift" data-i="${i}" aria-label="Remove ${esc(l.name || 'exercise')}">×</button>
+    </div>
+    <div class="nums">
+      <input type="text" id="l-${l.id}-s" data-list="lifts" data-i="${i}" data-f="scheme" value="${esc(l.scheme || '')}" placeholder="3x10" aria-label="Sets x reps">
+      <div class="wt"><input type="number" inputmode="decimal" step="0.25" id="l-${l.id}-w" data-list="lifts" data-i="${i}" data-f="weight" value="${fromKg(l.weight)}" aria-label="Weight in ${u}"><span>${u}</span></div>
+      <button type="button" class="btn quiet" data-act="bump" data-i="${i}" data-v="2.5">+2.5</button>
+      <button type="button" class="btn quiet" data-act="bump" data-i="${i}" data-v="5">+5</button>
+    </div>
+    <div class="meta">
+      <span id="ll-${l.id}">${lastText(l)}</span>
+      <span id="d-${l.id}">${deltaBadge(l)}</span>
+    </div>
+    <input type="text" class="note" id="l-${l.id}-o" data-list="lifts" data-i="${i}" data-f="note" value="${esc(l.note || '')}" placeholder="Note (optional), e.g. 10kg each, knee felt off" aria-label="Note">
+  </div>`;
+}
+function sessionLifts(dayId) {
+  const pd = (S.program?.days || []).find(d => d.id === dayId); if (!pd) return [];
+  return pd.exercises.map(e => { const last = lastLift(e.name, S.cur); return { id: uid(), name: e.name, scheme: e.scheme || '', weight: last ? last.weight : null, note: '' }; });
 }
 
 function renderToday() {
   if (!S.draft) loadDraft();
   const d = S.draft, isToday = S.cur === today();
-  $('#dateTitle').textContent = isToday ? 'Today, ' + fmtDay(S.cur, { day: 'numeric', month: 'short' }) : fmtDay(S.cur, { weekday: 'long', day: 'numeric', month: 'short' });
+  $('#dateTitle').textContent = isToday ? 'Today, ' + short(S.cur) : fmtDay(S.cur, { weekday: 'long', day: 'numeric', month: 'short' });
   $('#next').disabled = isToday; $('#toToday').hidden = isToday;
   const dis = S.canWrite ? '' : 'disabled';
+  $('#banners').innerHTML = !S.canWrite ? '<div class="banner"><p>You can view this log but not change it.</p></div>' : '';
 
-  const ex = Object.values(S.days).filter(x => x.example).length;
-  let banners = '';
-  if (!S.canWrite) banners += '<div class="banner"><p>You can view this log but not change it.</p></div>';
-  if (d.example) banners += '<div class="banner"><span class="tag">Example</span><p>This day is sample data. Edit anything and it becomes yours, or remove all examples in History.</p></div>';
-  else if (ex && isToday) banners += `<div class="banner"><span class="tag">Example</span><p>${ex} sample days are loaded so Trends has something to show. Remove them in History once you have a week of your own.</p></div>`;
-  $('#banners').innerHTML = banners;
-
-  const recent = recentMeals();
-  const names = exerciseNames();
-  const last = lastSession(d.workout.type === 'strength' || !d.workout.type ? 'strength' : d.workout.type) || lastSession('');
-  const ds = daysSincePeriodStart();
-  const u = U();
+  const names = exerciseNames(), u = U(), ci = cycleInfo(S.cur);
+  const days = S.program?.days || [];
+  const wk = programWeek();
+  const sessionChips = days.map(pd => [pd.id, pd.name.replace(/^Training\s+/i, '')]).concat([['other', 'Other']]);
 
   $('#form').innerHTML = `
   <fieldset class="card" id="c-sleep" ${dis} style="margin:0">
-    <div class="card-head"><h3>Sleep</h3><p class="hint">Last night, from your Watch: Sleep → total asleep</p></div>
+    <div class="card-head"><h3>Sleep</h3><p class="hint">Last night, from your Watch: Sleep → time asleep</p></div>
     <div class="row">
       <div class="field" style="flex-basis:220px"><span class="lbl">Time asleep</span>
         <div class="hm"><input type="number" inputmode="numeric" id="in-sleep-h" data-sleep="h" min="0" max="16" value="${d.sleep.hours != null ? Math.floor(Math.round(d.sleep.hours * 60) / 60) : ''}" aria-label="Hours"><span>hr</span>
@@ -373,58 +435,41 @@ function renderToday() {
     ${scale('feel.focus', d.feel.focus, 'Focus')}
     ${scale('feel.anxiety', d.feel.anxiety, 'Anxiety')}
     <div class="field"><span class="lbl">ADHD meds</span>${chipRow('feel.meds', d.feel.meds, [['yes', 'Taken'], ['late', 'Taken late'], ['no', 'Skipped'], ['none', 'Not on meds']])}</div>
-    <div class="field"><label for="in-note">Note</label><textarea id="in-note" data-k="feel.note" data-type="str" placeholder="Anything that stood out today">${esc(d.feel.note)}</textarea></div>
   </fieldset>
 
   <fieldset class="card" id="c-food" ${dis} style="margin:0">
-    <div class="card-head"><h3>Food</h3><p class="hint">Grams per meal. Rough numbers are fine.</p></div>
-    <div class="totals" id="foodTotals"></div>
-    <div class="items">${d.food.meals.map((m, i) => `
-      <div class="item">
-        <div class="field"><label for="m-${m.id}-n">Meal</label><input type="text" id="m-${m.id}-n" data-list="meals" data-i="${i}" data-f="name" value="${esc(m.name)}" placeholder="e.g. Greek yoghurt + berries"></div>
-        <div class="field"><label for="m-${m.id}-p">Protein</label><input type="number" inputmode="decimal" id="m-${m.id}-p" data-list="meals" data-i="${i}" data-f="protein" value="${m.protein ?? ''}"></div>
-        <div class="field"><label for="m-${m.id}-c">Carbs</label><input type="number" inputmode="decimal" id="m-${m.id}-c" data-list="meals" data-i="${i}" data-f="carbs" value="${m.carbs ?? ''}"></div>
-        <div class="field"><label for="m-${m.id}-f">Fibre</label><input type="number" inputmode="decimal" id="m-${m.id}-f" data-list="meals" data-i="${i}" data-f="fibre" value="${m.fibre ?? ''}"></div>
-        <button type="button" class="del" data-act="delMeal" data-i="${i}" aria-label="Remove ${esc(m.name || 'meal')}">×</button>
-      </div>`).join('')}
-    </div>
-    <div class="btnrow"><button type="button" class="btn primary" data-act="addMeal">+ Add meal</button></div>
-    ${recent.length ? `<div class="field"><span class="lbl">Eaten recently, tap to add again</span><div class="chips">${recent.map((m, i) => `<button type="button" class="btn quiet" data-act="reMeal" data-i="${i}">${esc(m.name)} · ${m.protein ?? 0}g P</button>`).join('')}</div></div>` : ''}
-    <div class="row">
-      <div class="field"><span class="lbl">Water (glasses)</span><div class="water"><button type="button" class="iconbtn" data-act="water" data-v="-1" aria-label="One less glass">−</button><b class="num" id="waterN">${d.food.water}</b><button type="button" class="iconbtn" data-act="water" data-v="1" aria-label="One more glass">+</button><span class="hint">of ${S.prefs.water}</span></div></div>
-      <div class="field"><span class="lbl">Sugar cravings</span>${chipRow('food.cravings', d.food.cravings, [[0, 'None'], [1, 'Mild'], [2, 'Strong']])}</div>
-    </div>
+    <div class="card-head"><h3>Nutrition</h3><p class="hint">Following your meal plan</p></div>
+    <div class="field"><span class="lbl">Meal plan</span>${chipRow('food.plan', d.food.plan, PLAN)}</div>
+    <div class="field"><span class="lbl">Water (litres) · target ${S.prefs.water} L</span>${chipRow('food.water', d.food.water, WATER.map(v => [v, v + ' L']))}</div>
+    <div class="field"><span class="lbl">Bowel movements</span>${chipRow('food.bowel', d.food.bowel, BOWEL)}</div>
+    <div class="field"><span class="lbl">Sugar cravings</span>${chipRow('food.cravings', d.food.cravings, [[0, 'None'], [1, 'Mild'], [2, 'Strong']])}</div>
+    <div class="field"><label for="in-note">What can I improve on tomorrow?</label><textarea id="in-note" data-k="feel.note" data-type="str" placeholder="Include any off-plan eating or skipped meals">${esc(d.feel.note)}</textarea></div>
   </fieldset>
 
   <fieldset class="card" id="c-move" ${dis} style="margin:0">
-    <div class="card-head"><h3>Movement</h3></div>
+    <div class="card-head"><h3>Training</h3>${wk ? `<p class="hint">Program week ${wk.n}${wk.w ? ' · ' + esc(wk.w.note || '') + (wk.w.rest ? ' · ' + wk.w.rest + ' s rest' : '') : ''}</p>` : ''}</div>
     ${chipRow('workout.type', d.workout.type, WORKOUTS)}
+    ${d.workout.type === 'strength' ? `<div class="field"><span class="lbl">Which session?</span>
+      <div class="chips">${sessionChips.map(([v, l]) => `<button type="button" class="chip" data-act="session" data-v="${esc(v)}" aria-pressed="${d.workout.session === v}">${S.armSession === v ? 'Tap again to swap lifts' : esc(l)}</button>`).join('')}</div></div>` : ''}
+    ${d.workout.type === 'strength' && d.workout.lifts.length ? `<p class="hint">Each weight starts at what you lifted last time. Change it to today's weight.</p>` : ''}
+    <datalist id="exnames">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    ${d.workout.lifts.length ? `<div class="lifts">${d.workout.lifts.map(liftRow).join('')}</div>` : ''}
+    ${d.workout.type === 'strength' || d.workout.lifts.length ? `<div class="btnrow"><button type="button" class="btn" data-act="addLift">+ Add exercise</button></div>` : ''}
     <div class="row">
       <div class="field"><label for="in-workout-minutes">Minutes</label>${numIn('workout.minutes', d.workout.minutes, 'min="0"')}</div>
       <div class="field"><label for="in-workout-steps">Steps</label>${numIn('workout.steps', d.workout.steps, 'min="0"')}</div>
     </div>
     <div class="field scale"><span class="lbl">Effort (RPE)</span>${chipRow('workout.effort', d.workout.effort, Array.from({ length: 10 }, (_, i) => [i + 1, i + 1]))}<div class="ends"><span>Easy</span><span>All out</span></div></div>
-    <div class="field"><span class="lbl">Lifts</span>
-      <datalist id="exnames">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
-      <div class="items">${d.workout.lifts.map((l, i) => `
-        <div class="item lift">
-          <div class="field"><label for="l-${l.id}-n">Exercise</label><input type="text" list="exnames" id="l-${l.id}-n" data-list="lifts" data-i="${i}" data-f="name" value="${esc(l.name)}" placeholder="e.g. Hip thrust"></div>
-          <div class="field"><label for="l-${l.id}-s">Sets</label><input type="number" inputmode="numeric" id="l-${l.id}-s" data-list="lifts" data-i="${i}" data-f="sets" value="${l.sets ?? ''}"></div>
-          <div class="field"><label for="l-${l.id}-r">Reps</label><input type="number" inputmode="numeric" id="l-${l.id}-r" data-list="lifts" data-i="${i}" data-f="reps" value="${l.reps ?? ''}"></div>
-          <div class="field"><label for="l-${l.id}-w">${u}</label><input type="number" inputmode="decimal" id="l-${l.id}-w" data-list="lifts" data-i="${i}" data-f="weight" value="${fromKg(l.weight)}"></div>
-          <button type="button" class="del" data-act="delLift" data-i="${i}" aria-label="Remove ${esc(l.name || 'exercise')}">×</button>
-        </div>`).join('')}
-      </div>
-    </div>
-    <div class="btnrow">
-      <button type="button" class="btn primary" data-act="addLift">+ Add exercise</button>
-      ${last && !d.workout.lifts.length ? `<button type="button" class="btn" data-act="repeat" data-from="${last.date}">Repeat ${esc(fmtDay(last.date, { weekday: 'short', day: 'numeric', month: 'short' }))} (${last.w.lifts.length} lifts)</button>` : ''}
-    </div>
   </fieldset>
 
   <fieldset class="card" id="c-body" ${dis} style="margin:0">
-    <div class="card-head"><h3>Body &amp; cycle</h3>${ds ? `<p class="hint">Cycle day ${ds}, counted from your last logged period start</p>` : ''}</div>
-    <div class="row"><div class="field" style="max-width:200px"><label for="in-weight">Weight (${u})</label><input type="number" inputmode="decimal" id="in-weight" data-weight="1" value="${fromKg(d.body.weight)}"></div></div>
+    <div class="card-head"><h3>Body &amp; cycle</h3>${ci ? `<p class="hint">Cycle day ${ci.day} · next period ${dueText(ci)}</p>` : ''}</div>
+    <div class="row">
+      <div class="field"><label for="in-weight">Weight (${u})</label><input type="number" inputmode="decimal" step="0.1" id="in-weight" data-bodykg="weight" value="${fromKg(d.body.weight)}"></div>
+      <div class="field"><label for="in-body-waist">Waist (cm)</label>${numIn('body.waist', d.body.waist, 'step="0.5"')}</div>
+      <div class="field"><label for="in-body-hips">Hips (cm)</label>${numIn('body.hips', d.body.hips, 'step="0.5"')}</div>
+    </div>
+    <p class="hint" style="margin-top:-6px">For a recomp, measure waist and hips once a week. They show change the scale can't.</p>
     <div class="field"><span class="lbl">Period</span>${chipRow('body.flow', d.body.flow, FLOW, 'period')}</div>
     <div class="field"><span class="lbl">Symptoms today</span><div class="chips">${SYMPTOMS.map(s => `<button type="button" class="chip" data-multi="body.symptoms" data-v="${esc(s)}" aria-pressed="${d.body.symptoms.includes(s)}">${esc(s)}</button>`).join('')}</div></div>
   </fieldset>`;
@@ -435,14 +480,6 @@ function renderDerived() {
   const d = S.draft; if (!d) return;
   const f = done(d), n = Object.values(f).filter(Boolean).length;
   $('#progress').innerHTML = Object.entries(f).map(([k, v]) => `<span class="pill ${v ? 'done' : ''}">${k}</span>`).join('') + `<span class="count">${n} of 5 logged</span>`;
-  const ft = $('#foodTotals'); if (!ft) return;
-  const p = protein(d) || 0, fb = fibre(d) || 0, c = carbs(d) || 0;
-  const meter = (v, t) => `<div class="meter"><i style="width:${Math.min(100, t ? v / t * 100 : 0)}%"></i></div>`;
-  ft.innerHTML = `
-    <div class="total"><small>Protein</small><b class="num">${Math.round(p)} g</b>${meter(p, S.prefs.protein)}<small>target ${S.prefs.protein} g</small></div>
-    <div class="total"><small>Fibre</small><b class="num">${Math.round(fb)} g</b>${meter(fb, S.prefs.fibre)}<small>target ${S.prefs.fibre} g</small></div>
-    <div class="total"><small>Carbs</small><b class="num">${Math.round(c)} g</b><small>${p && c ? 'protein : carb  1 : ' + r1(c / p) : 'pair carbs with protein'}</small></div>`;
-  const w = $('#waterN'); if (w) w.textContent = d.food.water;
 }
 
 // form events
@@ -452,26 +489,33 @@ function getPath(path) { const [a, b] = path.split('.'); return S.draft[a][b]; }
 form.addEventListener('input', e => {
   const t = e.target, d = S.draft;
   if (t.dataset.k) {
-    const v = t.dataset.type === 'str' ? t.value : (t.value === '' ? null : +t.value);
-    setPath(t.dataset.k, v); touch();
+    setPath(t.dataset.k, t.dataset.type === 'str' ? t.value : (t.value === '' ? null : +t.value)); touch();
   } else if (t.dataset.sleep) {
     const h = $('#in-sleep-h').value, m = $('#in-sleep-m').value;
-    d.sleep.hours = h === '' && m === '' ? null : Math.round(((+h || 0) + (+m || 0) / 60) * 100) / 100; touch();
-  } else if (t.dataset.weight) {
+    d.sleep.hours = h === '' && m === '' ? null : r2((+h || 0) + (+m || 0) / 60); touch();
+  } else if (t.dataset.bodykg) {
     d.body.weight = toKg(t.value); touch();
   } else if (t.dataset.list) {
-    const list = t.dataset.list === 'meals' ? d.food.meals : d.workout.lifts, it = list[+t.dataset.i], f = t.dataset.f;
-    if (!it) return;
-    it[f] = f === 'name' ? t.value : (t.value === '' ? null : (f === 'weight' ? toKg(t.value) : +t.value));
+    const l = d.workout.lifts[+t.dataset.i], f = t.dataset.f; if (!l) return;
+    l[f] = f === 'weight' ? toKg(t.value) : t.value;
+    const b = document.getElementById('d-' + l.id); if (b) b.innerHTML = deltaBadge(l);
     touch();
   }
+});
+form.addEventListener('focusout', e => {
+  const t = e.target; if (t.dataset.f !== 'name') return;
+  const l = S.draft.workout.lifts[+t.dataset.i]; if (!l) return;
+  const last = lastLift(l.name, S.cur);
+  if (last && l.weight == null) { l.weight = last.weight; $('#l-' + l.id + '-w').value = fromKg(l.weight); if (!l.scheme && last.scheme) { l.scheme = last.scheme; $('#l-' + l.id + '-s').value = l.scheme; } touch(); }
+  $('#ll-' + l.id).innerHTML = lastText(l); $('#d-' + l.id).innerHTML = deltaBadge(l);
 });
 form.addEventListener('click', e => {
   const t = e.target.closest('button'); if (!t || !S.canWrite) return;
   const d = S.draft;
   if (t.dataset.chip) {
-    const k = t.dataset.chip, raw = t.dataset.v, v = /^\d+$/.test(raw) ? +raw : raw;
+    const k = t.dataset.chip, raw = t.dataset.v, v = /^[\d.]+$/.test(raw) ? +raw : raw;
     setPath(k, getPath(k) === v ? (k === 'workout.type' ? '' : null) : v);
+    if (k === 'workout.type') { renderToday(); touch(); return; }
     t.closest('.chips').querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', String(getPath(k)) === c.dataset.v));
     touch(); return;
   }
@@ -481,38 +525,135 @@ form.addEventListener('click', e => {
     t.setAttribute('aria-pressed', i < 0); touch(); return;
   }
   const a = t.dataset.act; if (!a) return;
-  const focusLast = sel => { const els = form.querySelectorAll(sel); els.length && els[els.length - 1].focus(); };
-  if (a === 'addMeal') { d.food.meals.push({ id: uid(), name: '', protein: null, carbs: null, fibre: null }); renderToday(); focusLast('[data-list="meals"][data-f="name"]'); }
-  if (a === 'reMeal') { const m = recentMeals()[+t.dataset.i]; d.food.meals.push({ ...clone(m), id: uid() }); renderToday(); touch(); }
-  if (a === 'delMeal') { d.food.meals.splice(+t.dataset.i, 1); renderToday(); touch(); }
-  if (a === 'addLift') { d.workout.lifts.push({ id: uid(), name: '', sets: null, reps: null, weight: null }); if (!d.workout.type) d.workout.type = 'strength'; renderToday(); focusLast('[data-list="lifts"][data-f="name"]'); touch(); }
-  if (a === 'delLift') { d.workout.lifts.splice(+t.dataset.i, 1); renderToday(); touch(); }
-  if (a === 'repeat') {
-    const src = S.days[t.dataset.from].workout;
-    d.workout.lifts = src.lifts.map(l => ({ ...clone(l), id: uid() }));
-    if (!d.workout.type) d.workout.type = src.type || 'strength';
-    renderToday(); touch();
+  if (a === 'session') {
+    const v = t.dataset.v;
+    if (d.workout.session === v) return;
+    if (v !== 'other' && d.workout.lifts.length && S.armSession !== v) { S.armSession = v; renderToday(); return; }
+    S.armSession = null; d.workout.session = v;
+    if (v !== 'other') d.workout.lifts = sessionLifts(v);
+    renderToday(); touch(); return;
   }
-  if (a === 'water') { d.food.water = Math.max(0, (d.food.water || 0) + +t.dataset.v); touch(); }
+  if (a === 'addLift') {
+    d.workout.lifts.push({ id: uid(), name: '', scheme: '', weight: null, note: '' });
+    if (!d.workout.type) d.workout.type = 'strength';
+    renderToday(); const els = form.querySelectorAll('[data-f="name"]'); els.length && els[els.length - 1].focus(); touch();
+  }
+  if (a === 'delLift') { d.workout.lifts.splice(+t.dataset.i, 1); renderToday(); touch(); }
+  if (a === 'bump') {
+    const l = d.workout.lifts[+t.dataset.i]; if (!l) return;
+    const cur = l.weight == null ? 0 : +fromKg(l.weight);
+    l.weight = toKg(cur + +t.dataset.v);
+    $('#l-' + l.id + '-w').value = fromKg(l.weight);
+    $('#d-' + l.id).innerHTML = deltaBadge(l); touch();
+  }
 });
 $('#prev').onclick = () => goTo(addDays(S.cur, -1));
 $('#next').onclick = () => goTo(addDays(S.cur, 1));
 $('#toToday').onclick = () => goTo(today());
 
 // ---------- Tabs ----------
-document.querySelector('.tabs').addEventListener('click', e => {
-  const b = e.target.closest('[data-tab]'); if (!b) return;
-  showTab(b.dataset.tab);
-});
+document.querySelector('.tabs').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (b) showTab(b.dataset.tab); });
 function showTab(tab) {
   flush(); S.tab = tab;
   document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === tab));
-  ['today', 'trends', 'history'].forEach(t => $('#' + t).hidden = t !== tab);
+  ['today', 'program', 'trends', 'history'].forEach(t => $('#' + t).hidden = t !== tab);
   try { localStorage.setItem('baseline.tab', tab); } catch (_) {}
-  if (tab === 'trends') renderTrends();
-  if (tab === 'history') renderHistory();
-  window.scrollTo(0, 0);
+  renderTab(); window.scrollTo(0, 0);
 }
+function renderTab() {
+  if (S.tab === 'program') renderProgram();
+  if (S.tab === 'trends') renderTrends();
+  if (S.tab === 'history') renderHistory();
+}
+
+// ---------- Program ----------
+function programWeek() {
+  const p = S.program; if (!p || !p.start) return null;
+  const n = Math.floor(diffDays(today(), p.start) / 7) + 1;
+  if (n < 1) return null;
+  return { n, w: (p.weeks || [])[n - 1] || null, total: (p.weeks || []).length };
+}
+function spark(h) {
+  if (h.length < 2) return '';
+  const W = 84, H = 26, vs = h.map(x => x.weight), lo = Math.min(...vs), hi = Math.max(...vs), sp = hi - lo || 1;
+  const x = i => 3 + i * (W - 6) / (h.length - 1), y = v => H - 4 - (v - lo) / sp * (H - 8);
+  const d = h.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.weight).toFixed(1)).join('');
+  const tipTxt = h.map(p => `${short(p.date)}: ${fromKg(p.weight)} ${U()}`).slice(-8).join('<br>');
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" data-tip="${esc(tipTxt)}" aria-hidden="true"><path d="${d}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${x(h.length - 1)}" cy="${y(vs[vs.length - 1])}" r="3.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/></svg>`;
+}
+let progTimer, progChain = Promise.resolve();
+function saveProgram() {
+  clearTimeout(progTimer);
+  progTimer = setTimeout(() => { progTimer = null; if (!S.db || !S.canWrite) return; const body = clone(S.program); setStatus('Saving…'); progChain = progChain.then(() => S.db.doc('program/main').set(body)).then(() => setStatus('Saved'), e => setStatus(errText(e), true)); }, 600);
+}
+function renderProgram() {
+  const p = S.program, el = $('#progBody'), u = U();
+  if (!p) { el.innerHTML = `<div class="datebar"><h2>Program</h2></div><div class="card"><p class="empty">No program yet.</p>${S.canWrite ? '<div class="btnrow" style="justify-content:center"><button class="btn primary" data-pact="new">Create a program</button></div>' : ''}</div>`; return; }
+  const wk = programWeek();
+  const head = `<div class="datebar"><h2>Program</h2>${S.canWrite ? `<button class="btn ${S.editProg ? 'primary' : ''}" data-pact="edit">${S.editProg ? 'Done' : 'Edit'}</button>` : ''}</div>
+    ${wk ? `<div class="banner"><div class="weekline"><b>Week ${wk.n}${wk.total ? ' of ' + wk.total : ''}</b><span>${wk.w ? esc([wk.w.note, wk.w.rest ? wk.w.rest + ' s rest' : ''].filter(Boolean).join(' · ')) : 'Past the planned weeks. Time to set the next block with your coach.'}</span></div></div>` : ''}`;
+  if (S.editProg) {
+    el.innerHTML = head + `<div class="stack">${p.days.map((d, di) => `
+      <section class="card"><div class="field"><label for="pd-${d.id}">Session name</label><input type="text" id="pd-${d.id}" data-pd="${di}" value="${esc(d.name)}"></div>
+        <div class="items">${d.exercises.map((x, xi) => `<div class="exedit">
+          <input type="text" id="px-${x.id}-n" list="exnames2" data-pd="${di}" data-px="${xi}" data-pf="name" value="${esc(x.name)}" placeholder="Exercise" aria-label="Exercise">
+          <input type="text" id="px-${x.id}-s" data-pd="${di}" data-px="${xi}" data-pf="scheme" value="${esc(x.scheme || '')}" placeholder="3x10" aria-label="Sets x reps">
+          <button class="del" data-pact="delx" data-pd="${di}" data-px="${xi}" aria-label="Remove ${esc(x.name)}">×</button></div>`).join('')}</div>
+        <div class="btnrow"><button class="btn" data-pact="addx" data-pd="${di}">+ Add exercise</button>
+          <button class="btn warn" data-pact="deld" data-pd="${di}">${S.armDelDay === d.id ? 'Tap again to delete this session' : 'Delete session'}</button></div>
+      </section>`).join('')}
+      <div class="btnrow"><button class="btn primary" data-pact="addd">+ Add training session</button></div>
+      <section class="card"><div class="field"><label for="p-start">Week 1 started on</label><input type="date" id="p-start" data-pstart="1" value="${esc(p.start || '')}" style="max-width:220px"></div>
+      <p class="hint">Renaming an exercise starts a new history for it. Past sessions keep their old name.</p></section>
+      <datalist id="exnames2">${exerciseNames().map(n => `<option value="${esc(n)}">`).join('')}</datalist></div>`;
+    return;
+  }
+  el.innerHTML = head + `<div class="stack">${p.days.map(d => {
+    const lastDone = Object.keys(S.days).filter(k => S.days[k].workout?.session === d.id).sort().pop();
+    return `<section class="card"><div class="card-head"><h3>${esc(d.name)}</h3><span class="hint">${lastDone ? 'Last done ' + esc(fmtDay(lastDone)) : 'Not logged yet'}</span></div>
+      <div class="exlist">${d.exercises.map(x => {
+        const h = history(x.name), first = h[0], last = h[h.length - 1];
+        const ch = first && last && h.length > 1 ? r2(last.weight - first.weight) : null;
+        return `<div class="ex"><div class="n">${esc(x.name)}<small>${esc(x.scheme || '')}${last && last.note ? ' · ' + esc(last.note) : ''}</small></div>
+          ${spark(h)}
+          <div class="w num">${last ? `<b>${fromKg(last.weight)} ${u}</b><small>${ch == null ? 'last' : ch > 0 ? '+' + fromKg(ch) + ' since ' + esc(short(first.date)) : ch < 0 ? '−' + fromKg(-ch) + ' since ' + esc(short(first.date)) : 'no change yet'}</small>` : '<small>no weights yet</small>'}</div></div>`;
+      }).join('')}</div>
+      ${S.canWrite ? `<div class="btnrow"><button class="btn primary" data-pact="start" data-pd="${esc(d.id)}">Log ${esc(d.name)} today</button></div>` : ''}</section>`;
+  }).join('')}</div>`;
+}
+$('#progBody').addEventListener('input', e => {
+  const t = e.target, p = S.program; if (!p) return;
+  if (t.dataset.pstart) { p.start = t.value; saveProgram(); return; }
+  if (t.dataset.pd == null) return;
+  const d = p.days[+t.dataset.pd];
+  if (t.dataset.px != null) d.exercises[+t.dataset.px][t.dataset.pf] = t.value; else d.name = t.value;
+  saveProgram();
+});
+$('#progBody').addEventListener('click', e => {
+  const t = e.target.closest('[data-pact]'); if (!t || !S.canWrite) return;
+  const a = t.dataset.pact, p = S.program;
+  if (a === 'new') { S.program = { start: today(), weeks: [], days: [{ id: 'd' + uid(), name: 'Training Day 1', exercises: [] }] }; S.editProg = true; saveProgram(); }
+  if (a === 'edit') S.editProg = !S.editProg;
+  if (a === 'addx') { p.days[+t.dataset.pd].exercises.push({ id: uid(), name: '', scheme: '3x10' }); saveProgram(); }
+  if (a === 'delx') { p.days[+t.dataset.pd].exercises.splice(+t.dataset.px, 1); saveProgram(); }
+  if (a === 'addd') { p.days.push({ id: 'd' + uid(), name: 'Training Day ' + (p.days.length + 1), exercises: [] }); saveProgram(); }
+  if (a === 'deld') {
+    const d = p.days[+t.dataset.pd];
+    if (S.armDelDay !== d.id) { S.armDelDay = d.id; renderProgram(); return; }
+    S.armDelDay = null; p.days.splice(+t.dataset.pd, 1); saveProgram();
+  }
+  if (a === 'start') {
+    flush(); S.cur = today(); loadDraft();
+    const d = S.draft;
+    d.workout.type = 'strength';
+    if (d.workout.session !== t.dataset.pd || !d.workout.lifts.length) { d.workout.session = t.dataset.pd; d.workout.lifts = sessionLifts(t.dataset.pd); }
+    showTab('today'); renderToday(); touch();
+    $('#c-move').scrollIntoView({ block: 'start' });
+    return;
+  }
+  renderProgram();
+  if (a === 'addx') { const els = $('#progBody').querySelectorAll(`[data-pd="${t.dataset.pd}"][data-pf="name"]`); els.length && els[els.length - 1].focus(); }
+});
 
 // ---------- Trends ----------
 const charts = {};
@@ -529,17 +670,19 @@ const hideTip = () => { tip.hidden = true; };
 
 function timeChart(id, dates, series, o) {
   const el = document.getElementById(id); if (!el) return;
+  if (!series.some(se => se.vals.some(v => v != null))) { el.innerHTML = `<p class="empty">${o.empty || 'Nothing logged in this range yet.'}</p>`; delete charts[id]; return; }
   const W = Math.max(260, el.clientWidth), H = o.h || 170;
   const hasEnd = series.length > 1 && series.every(s => s.kind !== 'bar');
-  const P = { l: 34, r: hasEnd ? 66 : 14, t: 12, b: o.band ? 34 : 22 };
+  const P = { l: 36, r: hasEnd ? 70 : 14, t: 12, b: o.band ? 34 : 22 };
   const n = dates.length, iw = W - P.l - P.r, ih = H - P.t - P.b;
   const step = n > 1 ? iw / (n - 1) : 0;
   const x = i => P.l + (n === 1 ? iw / 2 : i * step);
   const y = v => P.t + ih - (v - o.min) / (o.max - o.min) * ih;
   let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.label)}">`;
   o.ticks.forEach(t => { s += `<line class="grid" x1="${P.l}" x2="${W - P.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${P.l - 6}" y="${y(t) + 4}" text-anchor="end">${o.tickFmt ? o.tickFmt(t) : t}</text>`; });
-  const xl = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
-  xl.forEach(i => { s += `<text x="${x(i)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}">${esc(fmtDay(dates[i], { day: 'numeric', month: 'short' }))}</text>`; });
+  [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i).forEach(i => {
+    s += `<text x="${x(i)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}">${esc(short(dates[i]))}</text>`;
+  });
   if (o.band) {
     const bw = Math.max(2, Math.min(10, step || 10) - 1);
     o.band.vals.forEach((v, i) => { if (v) s += `<rect x="${x(i) - bw / 2}" y="${H - 30}" width="${bw}" height="6" rx="2" fill="var(--period)"/>`; });
@@ -556,12 +699,11 @@ function timeChart(id, dates, series, o) {
       });
       return;
     }
-    const pts = se.vals.map((v, i) => v == null ? null : [x(i), y(v)]);
-    const real = pts.filter(Boolean);
-    if (real.length > 1) s += `<path d="${real.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('')}" fill="none" stroke="${se.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-    if (n <= 31 || real.length < 20) real.forEach(p => { s += `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="${se.color}" stroke="var(--surface)" stroke-width="2"/>`; });
+    const real = se.vals.map((v, i) => v == null ? null : [x(i), y(v)]).filter(Boolean);
+    if (!se.dotsOnly && real.length > 1) s += `<path d="${real.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('')}" fill="none" stroke="${se.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (se.dotsOnly || n <= 31 || real.length < 20) real.forEach(p => { s += `<circle cx="${p[0]}" cy="${p[1]}" r="${se.dotsOnly ? 3 : 4}" fill="${se.color}" stroke="var(--surface)" stroke-width="${se.dotsOnly ? 1 : 2}"/>`; });
     let li = -1; se.vals.forEach((v, i) => { if (v != null) li = i; });
-    if (li >= 0) ends.push({ name: se.name, y: y(se.vals[li]), x: x(li), color: se.color });
+    if (li >= 0) ends.push({ name: se.name, y: y(se.vals[li]) });
   });
   if (hasEnd) {
     ends.sort((a, b) => a.y - b.y);
@@ -570,13 +712,12 @@ function timeChart(id, dates, series, o) {
   }
   s += `<line class="xh" x1="0" x2="0" y1="${P.t}" y2="${P.t + ih}" visibility="hidden"/></svg>`;
   el.innerHTML = s;
-  charts[id] = { dates, series, x, P, W, n, step, fmt: o.fmt, extra: o.extraTip };
+  charts[id] = { dates, series, x, P, n, step, fmt: o.fmt, extra: o.extraTip };
 }
 function chartHover(e) {
   const el = e.target.closest('.chart[id]'); if (!el || !charts[el.id]) return;
   const c = charts[el.id], svg = el.querySelector('svg'), r = svg.getBoundingClientRect();
-  const px = e.clientX - r.left;
-  const i = c.n === 1 ? 0 : Math.max(0, Math.min(c.n - 1, Math.round((px - c.P.l) / c.step)));
+  const i = c.n === 1 ? 0 : Math.max(0, Math.min(c.n - 1, Math.round((e.clientX - r.left - c.P.l) / c.step)));
   const xh = svg.querySelector('.xh'); xh.setAttribute('x1', c.x(i)); xh.setAttribute('x2', c.x(i)); xh.setAttribute('visibility', 'visible');
   let h = `<b>${esc(fmtDay(c.dates[i]))}</b>`;
   c.series.forEach(se => { const v = se.vals[i]; h += `<br><span class="sw" style="background:${se.color}"></span>${esc(se.name)}: ${v == null ? 'not logged' : esc(c.fmt ? c.fmt(v, se) : v)}`; });
@@ -584,7 +725,7 @@ function chartHover(e) {
   showTip(h, e.clientX, e.clientY);
 }
 document.addEventListener('pointermove', e => {
-  if (e.target.closest('.chart[id]')) return chartHover(e);
+  if (e.target.closest('.chart[id]') && charts[e.target.closest('.chart[id]').id]) return chartHover(e);
   const t = e.target.closest('[data-tip]');
   if (t) return showTip(t.dataset.tip, e.clientX, e.clientY);
   hideTip(); document.querySelectorAll('.xh').forEach(l => l.setAttribute('visibility', 'hidden'));
@@ -594,17 +735,16 @@ document.addEventListener('pointerdown', e => { if (e.target.closest('.chart[id]
 function heatmap(id, dates) {
   const el = document.getElementById(id); if (!el) return;
   const W = Math.max(260, el.clientWidth);
-  const first = parse(dates[0]); const lead = (first.getDay() + 6) % 7; // Monday-first rows
+  const lead = (parse(dates[0]).getDay() + 6) % 7; // Monday-first rows
   const weeks = Math.ceil((lead + dates.length) / 7);
   const cs = Math.max(8, Math.min(22, Math.floor((W - 30) / weeks) - 3)), gap = 3;
-  const H = 7 * (cs + gap) + 4;
-  let s = `<svg width="${Math.min(W, 30 + weeks * (cs + gap))}" height="${H}" role="img" aria-label="Workout minutes calendar">`;
+  let s = `<svg width="${Math.min(W, 30 + weeks * (cs + gap))}" height="${7 * (cs + gap) + 4}" role="img" aria-label="Training calendar">`;
   ['M', '', 'W', '', 'F', '', 'S'].forEach((l, r) => { if (l) s += `<text x="0" y="${r * (cs + gap) + cs - 2}">${l}</text>`; });
   dates.forEach((dt, k) => {
-    const p = lead + k, col = Math.floor(p / 7), row = p % 7, d = getDay(dt);
-    const w = d && d.workout, mins = w && isWorkout(d) ? (w.minutes || 30) : 0;
-    const lvl = !mins ? 0 : mins < 20 ? 1 : mins < 45 ? 2 : mins < 75 ? 3 : 4;
-    const label = !d || !w.type ? 'nothing logged' : w.type === 'rest' ? 'rest day' : `${(WORKOUTS.find(x => x[0] === w.type) || [, w.type])[1]}${w.minutes ? ', ' + w.minutes + ' min' : ''}${w.effort ? ', RPE ' + w.effort : ''}`;
+    const p = lead + k, col = Math.floor(p / 7), row = p % 7, d = getDay(dt), w = d && d.workout;
+    const lvl = !w || !isWorkout(d) ? 0 : w.type === 'strength' ? 4 : w.type === 'hiit' ? 3 : w.type === 'cardio' ? 2 : 1;
+    const sess = w && w.session && S.program ? (S.program.days.find(x => x.id === w.session) || {}).name : '';
+    const label = !d || !w.type ? 'nothing logged' : w.type === 'rest' ? 'rest day' : `${(WORKOUTS.find(x => x[0] === w.type) || [, w.type])[1]}${sess ? ' · ' + sess : ''}${w.minutes ? ', ' + w.minutes + ' min' : ''}`;
     s += `<rect x="${30 + col * (cs + gap)}" y="${row * (cs + gap)}" width="${cs}" height="${cs}" rx="4" fill="var(--seq${lvl})" data-tip="<b>${esc(fmtDay(dt))}</b><br>${esc(label)}"${d && w.type === 'rest' ? ' stroke="var(--muted)" stroke-dasharray="2 2"' : ''}/>`;
   });
   el.innerHTML = s + '</svg>';
@@ -615,89 +755,97 @@ function compare(dates, split, metric) {
   dates.forEach(dt => { const d = getDay(dt); if (!d) return; const m = metric(d), g = split(d); if (m == null || g == null) return; (g ? a : b).push(m); });
   return { a: avg(a), b: avg(b), na: a.length, nb: b.length, ok: a.length >= 3 && b.length >= 3 };
 }
-const signed = v => (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(r1(v));
+const signed = (v, unit = '') => (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(r1(v)) + unit;
+function rolling(dates, f, win = 7) {
+  return dates.map(dt => { const vs = []; for (let k = 0; k < win; k++) { const d = getDay(addDays(dt, -k)); const v = d ? f(d) : null; if (v != null) vs.push(v); } return vs.length ? avg(vs) : null; });
+}
 
 function renderTrends() {
   document.querySelectorAll('#range .chip').forEach(c => c.setAttribute('aria-pressed', +c.dataset.range === S.range));
   const end = today(), dates = Array.from({ length: S.range }, (_, i) => addDays(end, i - S.range + 1));
-  const logged = dates.filter(dt => S.days[dt]);
   const body = $('#trendBody');
-  if (!logged.length) { body.innerHTML = `<div class="card"><p class="empty">No days logged in the last ${S.range} days yet. Log today on the Log tab and your trends start here.</p></div>`; return; }
+  if (!dates.some(dt => S.days[dt])) { body.innerHTML = `<div class="card"><p class="empty">No days logged in the last ${S.range} days yet. Log today on the Log tab and your trends start here.</p></div>`; return; }
   const p = S.prefs, u = U();
 
   // insights
-  const sleepOK = p.sleep - 1;
+  const names = [...new Set((S.program?.days || []).flatMap(d => d.exercises.map(x => x.name)).filter(Boolean))];
+  const prog = names.map(n => { const h = history(n); return h.length > 1 ? { n, first: h[0], last: h[h.length - 1], d: h[h.length - 1].weight - h[0].weight } : null; }).filter(Boolean);
+  const up = prog.filter(x => x.d > 0.01), best = prog.slice().sort((a, b) => b.d - a.d)[0];
+  const wAvg = rolling(dates, d => d.body.weight);
+  const wFirst = wAvg.find(v => v != null), wLast = [...wAvg].reverse().find(v => v != null);
+  const sl = dates.map(dt => getDay(dt)?.sleep.hours).filter(v => v != null);
+  const short7 = sl.filter(v => v < 7).length;
   const i1 = compare(dates, d => !!isWorkout(d), d => d.feel.energy);
-  const i2 = compare(dates, d => d.sleep.hours == null ? null : d.sleep.hours >= sleepOK, d => d.feel.focus);
-  const i3 = compare(dates, d => protein(d) == null ? null : protein(d) >= p.protein * 0.9, d => d.food.cravings == null ? null : (d.food.cravings === 2 ? 100 : 0));
-  const streak = (() => { let n = 0, k = S.days[end] ? end : addDays(end, -1); while (S.days[k] && !S.days[k].example) { n++; k = addDays(k, -1); } return n; })();
+  const i2 = compare(dates, d => d.sleep.hours == null ? null : d.sleep.hours >= p.sleep - 1, d => d.feel.focus);
   const tile = (k, ok, v, text, need) => `<div class="insight"><span class="k">${k}</span>${ok ? `<span class="v num">${v}</span><p>${text}</p>` : `<span class="v" style="color:var(--muted)">–</span><p>${need}</p>`}</div>`;
   const insights = `<div class="insights">
-    ${tile('Energy · workout days', i1.ok, signed(i1.a - i1.b), `Energy averages ${r1(i1.a)} on workout days and ${r1(i1.b)} on other days (${i1.na} vs ${i1.nb} days).`, 'Log energy on at least 3 workout days and 3 days without one.')}
-    ${tile(`Focus · ${sleepOK}h+ sleep`, i2.ok, signed(i2.a - i2.b), `Focus averages ${r1(i2.a)} after ${sleepOK}h+ of sleep and ${r1(i2.b)} after less (${i2.na} vs ${i2.nb} days).`, `Log sleep and focus on 3+ nights over ${sleepOK}h and 3+ under.`)}
-    ${tile('Strong cravings', i3.ok, `${Math.round(i3.a)}% vs ${Math.round(i3.b)}%`, `Share of days with strong sugar cravings when protein hit ~${p.protein} g, compared with days it didn't.`, 'Log meals and cravings on 3+ high-protein days and 3+ lower ones.')}
-    ${tile('Logging streak', true, streak + (streak === 1 ? ' day' : ' days'), streak ? 'Days in a row with something logged. Missing a day is fine. Pick it back up.' : 'Log anything today to start a streak.', '')}
-  </div><p class="footnote" style="margin:-4px 0 16px">These are patterns in your own log, not proof of cause. They get more reliable after a few weeks.</p>`;
+    ${tile('Lifts going up', prog.length > 0, `${up.length} of ${prog.length}`, `exercises are heavier than the first time you logged them.${best && best.d > 0 ? ` Biggest jump: ${esc(best.n)}, ${fromKg(best.first.weight)} → ${fromKg(best.last.weight)} ${u}.` : ''}`, 'Log an exercise twice to see it here.')}
+    ${tile('Weight, 7-day average', wFirst != null && wLast != null && wAvg.filter(v => v != null).length > 3, wLast != null && wFirst != null ? signed(+fromKg(wLast) - +fromKg(wFirst), ' ' + u) : '', `From ${fromKg(r1(wFirst || 0))} to ${fromKg(r1(wLast || 0))} ${u} over ${S.range} days. On a recomp, a steady scale while lifts climb still means progress.`, 'Weigh in on a few mornings to see the trend.')}
+    ${tile('Sleep', sl.length >= 3, fmtHM(avg(sl)), `Average a night across ${sl.length} logged nights. ${short7} ${short7 === 1 ? 'was' : 'were'} under 7 hours.`, 'Log sleep on 3+ nights.')}
+    ${tile('Energy · training days', i1.ok, signed(i1.a - i1.b), `Energy averages ${r1(i1.a)} on training days and ${r1(i1.b)} on other days.`, 'Rate your energy on 3+ training days and 3+ other days to compare.')}
+    ${tile(`Focus · ${p.sleep - 1}h+ sleep`, i2.ok, signed(i2.a - i2.b), `Focus averages ${r1(i2.a)} after ${p.sleep - 1}h+ of sleep and ${r1(i2.b)} after less.`, `Rate focus on 3+ days after ${p.sleep - 1}h+ of sleep and 3+ after less.`)}
+  </div><p class="footnote" style="margin:-4px 0 16px">These are patterns in your own log, not proof of cause. They get more reliable over a few weeks.</p>`;
 
-  // lift options
-  const lifts = exerciseNames();
-  if (!S.lift || !lifts.includes(S.lift)) {
-    const cnt = {}; Object.values(S.days).forEach(d => (d.workout?.lifts || []).forEach(l => { if (l.name) cnt[l.name.trim()] = (cnt[l.name.trim()] || 0) + 1; }));
-    S.lift = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || null;
-  }
+  const lifts = exerciseNames().filter(n => history(n).length);
+  if (!S.lift || !lifts.includes(S.lift)) S.lift = lifts.slice().sort((a, b) => history(b).length - history(a).length)[0] || null;
   const symCount = {}; let symDays = 0;
   dates.forEach(dt => { const d = getDay(dt); if (!d) return; symDays++; d.body.symptoms.forEach(s => symCount[s] = (symCount[s] || 0) + 1); });
   const symList = Object.entries(symCount).sort((a, b) => b[1] - a[1]);
   const symMax = symList.length ? symList[0][1] : 1;
+  const hasMeas = dates.some(dt => { const d = getDay(dt); return d && (d.body.waist != null || d.body.hips != null); });
 
   body.innerHTML = insights + `<div class="stack">
+    <section class="card"><div class="card-head"><h3>Lift progress</h3>
+        ${lifts.length ? `<select id="liftSel" aria-label="Exercise" style="width:auto;max-width:100%">${lifts.map(n => `<option ${n === S.lift ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}</div>
+      ${lifts.length ? `<p class="hint">Weight per session (${u}), all time</p><div class="chart" id="ch-lift"></div>` : '<p class="empty">Log a training session to see each exercise climb over time.</p>'}</section>
+    <section class="card"><div class="card-head"><h3>Body weight</h3><p class="hint">${u} · dots are weigh-ins, line is the 7-day average</p></div>
+      <div class="legend"><span><i class="box" style="background:var(--muted);height:8px;width:8px;border-radius:50%"></i>Weigh-in</span><span><i style="background:var(--s1)"></i>7-day average</span></div>
+      <div class="chart" id="ch-weight"></div></section>
+    ${hasMeas ? `<section class="card"><div class="card-head"><h3>Measurements</h3><p class="hint">cm</p></div>
+      <div class="legend"><span><i style="background:var(--s1)"></i>Waist</span><span><i style="background:var(--s2)"></i>Hips</span></div><div class="chart" id="ch-meas"></div></section>` : ''}
+    <section class="card"><div class="card-head"><h3>Sleep</h3><p class="hint">Hours asleep · dashed line is your ${p.sleep}h target</p></div><div class="chart" id="ch-sleep"></div></section>
+    <section class="card"><div class="card-head"><h3>Training</h3><p class="hint">Darker = strength · dashed outline = rest day</p></div>
+      <div class="chart" id="ch-heat"></div>
+      <div class="legend"><span><i class="box" style="background:var(--seq1)"></i>Walk / yoga</span><span><i class="box" style="background:var(--seq2)"></i>Cardio</span><span><i class="box" style="background:var(--seq3)"></i>HIIT</span><span><i class="box" style="background:var(--seq4)"></i>Strength</span></div></section>
     <section class="card"><div class="card-head"><h3>How you felt</h3><p class="hint">1–5 scale · pink ticks are period days</p></div>
       <div class="legend"><span><i style="background:var(--s1)"></i>Energy</span><span><i style="background:var(--s2)"></i>Mood</span><span><i style="background:var(--s3)"></i>Focus</span><span><i class="box" style="background:var(--period);height:6px"></i>Period</span></div>
       <div class="chart" id="ch-feel"></div></section>
-    <section class="card"><div class="card-head"><h3>Sleep</h3><p class="hint">Hours asleep · dashed line is your ${p.sleep}h target</p></div><div class="chart" id="ch-sleep"></div></section>
-    <section class="card"><div class="card-head"><h3>Protein</h3><p class="hint">Grams per day · dashed line is your ${p.protein} g target</p></div><div class="chart" id="ch-protein"></div></section>
-    <section class="card"><div class="card-head"><h3>Workouts</h3><p class="hint">Darker = longer session · dashed outline = rest day</p></div>
-      <div class="chart" id="ch-heat"></div>
-      <div class="legend"><span>Less</span>${[0, 1, 2, 3, 4].map(l => `<i class="box" style="background:var(--seq${l})"></i>`).join('')}<span>More</span></div></section>
-    <section class="card"><div class="card-head"><h3>Lift progress</h3>
-        ${lifts.length ? `<select id="liftSel" aria-label="Exercise" style="width:auto;max-width:100%">${lifts.map(n => `<option ${n === S.lift ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}</div>
-      ${lifts.length ? `<p class="hint">Heaviest weight logged per session (${u}), all time</p><div class="chart" id="ch-lift"></div>` : '<p class="empty">Add lifts on the Log tab to see each exercise climb over time.</p>'}</section>
-    <section class="card"><div class="card-head"><h3>Body weight</h3><p class="hint">${u}</p></div><div class="chart" id="ch-weight"></div></section>
+    <section class="card"><div class="card-head"><h3>Water</h3><p class="hint">Litres · dashed line is your ${p.water} L target</p></div><div class="chart" id="ch-water"></div></section>
     <section class="card"><div class="card-head"><h3>Symptoms</h3><p class="hint">Days with each symptom, out of ${symDays} logged</p></div>
       ${symList.length ? `<div class="hbars">${symList.map(([k, v]) => `<div class="hbar" data-tip="<b>${esc(k)}</b><br>${v} of ${symDays} logged days"><span>${esc(k)}</span><div class="track"><i style="width:${v / symMax * 100}%"></i></div><span class="num">${v}</span></div>`).join('')}</div>` : '<p class="empty">No symptoms logged in this range.</p>'}</section>
   </div>`;
 
   const col = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
   const series = f => dates.map(dt => { const d = getDay(dt); return d ? f(d) : null; });
+  const span = (vals, pad, stepTo) => { const r = vals.filter(v => v != null); const lo = Math.min(...r), hi = Math.max(...r), sp = Math.max(pad, hi - lo); const mn = Math.max(0, Math.floor((lo - sp * 0.25) / stepTo) * stepTo), mx = Math.ceil((hi + sp * 0.25) / stepTo) * stepTo; return [mn, mx === mn ? mn + stepTo : mx]; };
+
+  if (S.lift) {
+    const h = history(S.lift), vals = h.map(x => +fromKg(x.weight)), [mn, mx] = span(vals, 5, 5);
+    timeChart('ch-lift', h.map(x => x.date), [{ name: S.lift, color: col('--s1'), vals }], { min: mn, max: mx, ticks: [mn, Math.round((mn + mx) / 2), mx], label: S.lift + ' weight by session', fmt: v => v + ' ' + u,
+      extraTip: i => (h[i].scheme ? `<br>${esc(h[i].scheme)}` : '') + (h[i].note ? `<br>${esc(h[i].note)}` : '') });
+  }
+  const wv = series(d => d.body.weight == null ? null : +fromKg(d.body.weight));
+  if (wv.some(v => v != null)) {
+    const [mn, mx] = span(wv, 2, 1);
+    timeChart('ch-weight', dates, [{ name: 'Weigh-in', color: col('--muted'), vals: wv, dotsOnly: true }, { name: '7-day avg', color: col('--s1'), vals: wAvg.map(v => v == null ? null : +fromKg(r1(v))) }],
+      { min: mn, max: mx, ticks: [mn, r1((mn + mx) / 2), mx], label: 'Body weight by day', fmt: v => v + ' ' + u });
+  } else $('#ch-weight').innerHTML = '<p class="empty">Log your weight in Body &amp; cycle to see the trend.</p>';
+  if (hasMeas) {
+    const wa = series(d => d.body.waist), hi = series(d => d.body.hips), [mn, mx] = span(wa.concat(hi), 4, 2);
+    timeChart('ch-meas', dates, [{ name: 'Waist', color: col('--s1'), vals: wa }, { name: 'Hips', color: col('--s2'), vals: hi }], { min: mn, max: mx, ticks: [mn, Math.round((mn + mx) / 2), mx], label: 'Waist and hip measurements', fmt: v => v + ' cm' });
+  }
+  const sv = series(d => d.sleep.hours);
+  timeChart('ch-sleep', dates, [{ name: 'Asleep', kind: 'bar', color: col('--s1'), vals: sv }],
+    { min: 0, max: Math.max(12, ...sv.filter(v => v != null)), ticks: [0, 4, 8, 12], target: p.sleep, label: 'Hours asleep by night', fmt: v => fmtHM(v), tickFmt: t => t + 'h', empty: 'Log sleep on the Log tab to see it here.' });
+  heatmap('ch-heat', dates);
   timeChart('ch-feel', dates, [
     { name: 'Energy', color: col('--s1'), vals: series(d => d.feel.energy) },
     { name: 'Mood', color: col('--s2'), vals: series(d => d.feel.mood) },
     { name: 'Focus', color: col('--s3'), vals: series(d => d.feel.focus) }
-  ], { min: 1, max: 5, ticks: [1, 2, 3, 4, 5], label: 'Energy, mood and focus by day', h: 200, band: { vals: series(d => !!d.body.flow) },
+  ], { min: 1, max: 5, ticks: [1, 2, 3, 4, 5], label: 'Energy, mood and focus by day', h: 200, band: { vals: series(d => !!d.body.flow) }, empty: 'Rate energy, mood and focus on the Log tab. A few taps a day is enough to see patterns here.',
     extraTip: i => { const d = getDay(dates[i]); return d && d.body.flow ? `<br>Period: ${esc(d.body.flow)}` : ''; } });
-  const sl = series(d => d.sleep.hours);
-  timeChart('ch-sleep', dates, [{ name: 'Asleep', kind: 'bar', color: col('--s1'), vals: sl }],
-    { min: 0, max: Math.max(10, ...sl.filter(v => v != null)), ticks: [0, 4, 8], target: p.sleep, label: 'Hours asleep by night', fmt: v => fmtHM(v), tickFmt: t => t + 'h' });
-  const pr = series(d => protein(d));
-  const pmax = Math.max(p.protein * 1.25, ...pr.filter(v => v != null));
-  timeChart('ch-protein', dates, [{ name: 'Protein', kind: 'bar', color: col('--s1'), vals: pr }],
-    { min: 0, max: pmax, ticks: [0, Math.round(pmax / 2 / 10) * 10, Math.round(pmax / 10) * 10].filter((v, i, a) => a.indexOf(v) === i), target: p.protein, label: 'Protein grams by day', fmt: v => Math.round(v) + ' g', tickFmt: t => t + 'g' });
-  heatmap('ch-heat', dates);
-  if (S.lift) {
-    const ld = Object.keys(S.days).sort().filter(k => (S.days[k].workout?.lifts || []).some(l => (l.name || '').trim() === S.lift && l.weight != null));
-    if (ld.length) {
-      const vals = ld.map(k => { const ls = S.days[k].workout.lifts.filter(l => (l.name || '').trim() === S.lift && l.weight != null); return fromKg(Math.max(...ls.map(l => l.weight))); });
-      const lo = Math.min(...vals), hi = Math.max(...vals), span = Math.max(5, hi - lo), mn = Math.max(0, Math.floor((lo - span * 0.2) / 5) * 5), mx = Math.ceil((hi + span * 0.2) / 5) * 5;
-      timeChart('ch-lift', ld, [{ name: S.lift, color: col('--s1'), vals }], { min: mn, max: mx, ticks: [mn, Math.round((mn + mx) / 2), mx], label: S.lift + ' heaviest weight by session', fmt: v => v + ' ' + u,
-        extraTip: i => { const l = S.days[ld[i]].workout.lifts.find(l => (l.name || '').trim() === S.lift); return l ? `<br>${l.sets ?? '?'} × ${l.reps ?? '?'}` : ''; } });
-    } else $('#ch-lift').innerHTML = '<p class="empty">No weights logged for this exercise yet.</p>';
-  }
-  const wv = series(d => d.body.weight == null ? null : fromKg(d.body.weight));
-  const wr = wv.filter(v => v != null);
-  if (wr.length) {
-    const lo = Math.min(...wr), hi = Math.max(...wr), mn = Math.floor(lo - 1), mx = Math.ceil(hi + 1);
-    timeChart('ch-weight', dates, [{ name: 'Weight', color: col('--s1'), vals: wv }], { min: mn, max: mx, ticks: [mn, r1((mn + mx) / 2), mx], label: 'Body weight by day', fmt: v => v + ' ' + u });
-  } else $('#ch-weight').innerHTML = '<p class="empty">Log your weight in Body &amp; cycle to see the trend. Weekly is plenty.</p>';
+  timeChart('ch-water', dates, [{ name: 'Water', kind: 'bar', color: col('--s1'), vals: series(d => d.food.water) }],
+    { min: 0, max: 4, ticks: [0, 2, 4], target: p.water, label: 'Water litres by day', fmt: v => v + ' L', tickFmt: t => t + 'L', empty: 'Log water on the Log tab to see it here.' });
   const sel = $('#liftSel'); if (sel) sel.onchange = () => { S.lift = sel.value; renderTrends(); };
 }
 $('#range').addEventListener('click', e => { const b = e.target.closest('[data-range]'); if (!b) return; S.range = +b.dataset.range; try { localStorage.setItem('baseline.range', S.range); } catch (_) {} renderTrends(); });
@@ -706,33 +854,31 @@ let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() 
 // ---------- History ----------
 function summary(d) {
   const bits = [];
-  if (d.sleep.hours != null) bits.push(fmtHM(d.sleep.hours) + ' sleep');
-  if (d.feel.energy != null) bits.push('energy ' + d.feel.energy);
-  if (d.feel.mood != null) bits.push('mood ' + d.feel.mood);
-  if (d.workout.type) bits.push((WORKOUTS.find(x => x[0] === d.workout.type) || [, d.workout.type])[1] + (d.workout.minutes ? ' ' + d.workout.minutes + 'm' : ''));
-  if (protein(d) != null) bits.push(Math.round(protein(d)) + ' g protein');
   if (d.body.weight != null) bits.push(fromKg(d.body.weight) + ' ' + U());
+  if (d.sleep.hours != null) bits.push(fmtHM(d.sleep.hours) + ' sleep');
+  if (d.food.water != null) bits.push(d.food.water + ' L water');
+  if (d.workout.type) {
+    const sess = d.workout.session && S.program ? (S.program.days.find(x => x.id === d.workout.session) || {}).name : '';
+    bits.push(sess || (WORKOUTS.find(x => x[0] === d.workout.type) || [, d.workout.type])[1]);
+  }
+  if (d.food.plan === 'off') bits.push('off-plan meal'); if (d.food.plan === 'skipped') bits.push('skipped a meal');
   if (d.body.flow) bits.push('period');
+  if (d.feel.energy != null) bits.push('energy ' + d.feel.energy);
   return bits.join(' · ') || 'Started, nothing filled in';
 }
 function renderHistory() {
-  const ks = Object.keys(S.days).sort().reverse();
-  const ex = ks.filter(k => S.days[k].example);
-  const p = S.prefs;
+  const ks = Object.keys(S.days).sort().reverse(), p = S.prefs;
   $('#histBody').innerHTML = `
     <div class="datebar"><h2>History</h2><span class="hint">${ks.length} days logged</span></div>
-    ${ex.length ? `<div class="banner"><span class="tag">Example</span><p>${ex.length} sample days are mixed into your trends.</p>
-      <button class="btn warn" id="rmEx" ${S.canWrite ? '' : 'disabled'}>${S.armRemove ? `Tap again to delete ${ex.length} sample days` : 'Remove example data'}</button></div>` : ''}
-    <div class="banner"><p><b>Already tracking elsewhere?</b> Paste your Google Docs log (food, weights, lifts) or Apple Watch sleep numbers into your chat with Claude, and it can load them here as past days.</p></div>
-    <div class="days">${ks.length ? ks.map(k => { const d = getDay(k); return `<button class="day" data-day="${k}"><span class="d">${esc(fmtDay(k, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }))}${d.example ? ' <span class="tag">Example</span>' : ''}</span><span class="s">${esc(summary(d))}</span></button>`; }).join('') : '<div class="card"><p class="empty">Nothing logged yet. Your days will collect here.</p></div>'}</div>
+    <div class="days">${ks.length ? ks.map(k => { const d = getDay(k); return `<button class="day" data-day="${k}"><span class="d">${esc(fmtDay(k, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }))}</span><span class="s">${esc(summary(d))}</span>${d.feel.note ? `<span class="s">“${esc(d.feel.note)}”</span>` : ''}</button>`; }).join('') : '<div class="card"><p class="empty">Nothing logged yet. Your days will collect here.</p></div>'}</div>
     <section class="card" style="margin-top:22px"><div class="card-head"><h3>Targets &amp; units</h3><p class="hint">Saved for every device</p></div>
       <div class="row">
-        <div class="field"><span class="lbl">Weight unit</span>${'<div class="chips">' + [['kg', 'kg'], ['lb', 'lb']].map(([v, l]) => `<button class="chip" data-unit="${v}" aria-pressed="${p.unit === v}">${l}</button>`).join('') + '</div>'}</div>
-        <div class="field"><label for="pf-protein">Protein g/day</label><input type="number" id="pf-protein" data-pref="protein" value="${p.protein}"></div>
-        <div class="field"><label for="pf-fibre">Fibre g/day</label><input type="number" id="pf-fibre" data-pref="fibre" value="${p.fibre}"></div>
-        <div class="field"><label for="pf-water">Water glasses</label><input type="number" id="pf-water" data-pref="water" value="${p.water}"></div>
+        <div class="field"><span class="lbl">Weight unit</span><div class="chips">${[['kg', 'kg'], ['lb', 'lb']].map(([v, l]) => `<button class="chip" data-unit="${v}" aria-pressed="${p.unit === v}">${l}</button>`).join('')}</div></div>
+        <div class="field"><label for="pf-water">Water (L)</label><input type="number" step="0.5" id="pf-water" data-pref="water" value="${p.water}"></div>
         <div class="field"><label for="pf-sleep">Sleep hours</label><input type="number" id="pf-sleep" data-pref="sleep" value="${p.sleep}"></div>
+        <div class="field"><label for="pf-cycle">Usual cycle (days)</label><input type="number" id="pf-cycle" data-pref="cycle" value="${p.cycle}"></div>
       </div>
+      <p class="hint">Cycle length is only used until you've logged two period starts. After that it uses your real average.</p>
       ${S.dl ? '<div class="btnrow"><button class="btn" id="csv">Export all days as CSV</button></div>' : ''}
     </section>`;
 }
@@ -742,24 +888,20 @@ function savePrefs() {
   prefTimer = setTimeout(() => { if (!S.db || !S.canWrite) return; const body = clone(S.prefs); prefChain = prefChain.then(() => S.db.doc('settings/prefs').set(body)).then(() => setStatus('Saved'), e => setStatus(errText(e), true)); }, 600);
 }
 $('#histBody').addEventListener('input', e => { const k = e.target.dataset.pref; if (!k || e.target.value === '') return; S.prefs[k] = +e.target.value; savePrefs(); });
-$('#histBody').addEventListener('click', async e => {
+$('#histBody').addEventListener('click', e => {
   const t = e.target.closest('button'); if (!t) return;
   if (t.dataset.day) { S.cur = t.dataset.day; loadDraft(); renderToday(); showTab('today'); return; }
   if (t.dataset.unit) { S.prefs.unit = t.dataset.unit; savePrefs(); renderHistory(); renderToday(); return; }
-  if (t.id === 'rmEx') {
-    if (!S.armRemove) { S.armRemove = true; renderHistory(); setTimeout(() => { S.armRemove = false; if (S.tab === 'history') renderHistory(); }, 5000); return; }
-    S.armRemove = false; t.disabled = true; setStatus('Removing examples…');
-    const ids = Object.keys(S.days).filter(k => S.days[k].example);
-    try { for (const k of ids) await S.db.doc('days/' + k).delete(); ids.forEach(k => delete S.days[k]); setStatus('Examples removed'); }
-    catch (err) { setStatus(errText(err), true); }
-    loadDraft(); renderToday(); renderHistory(); return;
-  }
   if (t.id === 'csv') exportCsv();
 });
 async function exportCsv() {
-  const cols = ['date', 'sleep_hours', 'sleep_quality', 'bedtime', 'woke', 'energy', 'mood', 'focus', 'anxiety', 'adhd_meds', 'note', 'protein_g', 'carbs_g', 'fibre_g', 'water_glasses', 'cravings', 'meals', 'workout', 'minutes', 'rpe', 'steps', 'lifts', 'weight_' + U(), 'period', 'symptoms'];
+  const cols = ['date', 'weight_' + U(), 'waist_cm', 'hips_cm', 'sleep_hours', 'sleep_quality', 'bedtime', 'woke', 'water_l', 'meal_plan', 'bowel', 'cravings', 'improve_tomorrow', 'energy', 'mood', 'focus', 'anxiety', 'adhd_meds', 'training', 'session', 'minutes', 'rpe', 'steps', 'lifts', 'period', 'symptoms'];
   const q = v => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-  const rows = Object.keys(S.days).sort().map(k => { const d = getDay(k); return [k, d.sleep.hours, d.sleep.quality, d.sleep.bed, d.sleep.wake, d.feel.energy, d.feel.mood, d.feel.focus, d.feel.anxiety, d.feel.meds, d.feel.note, protein(d), carbs(d), fibre(d), d.food.water, d.food.cravings, d.food.meals.map(m => m.name).join('; '), d.workout.type, d.workout.minutes, d.workout.effort, d.workout.steps, d.workout.lifts.map(l => `${l.name} ${l.sets ?? '?'}x${l.reps ?? '?'} @ ${fromKg(l.weight)}${U()}`).join('; '), fromKg(d.body.weight), d.body.flow, d.body.symptoms.join('; ')].map(q).join(','); });
+  const rows = Object.keys(S.days).sort().map(k => {
+    const d = getDay(k), sess = d.workout.session && S.program ? (S.program.days.find(x => x.id === d.workout.session) || {}).name : d.workout.session;
+    return [k, fromKg(d.body.weight), d.body.waist, d.body.hips, d.sleep.hours, d.sleep.quality, d.sleep.bed, d.sleep.wake, d.food.water, d.food.plan, d.food.bowel, d.food.cravings, d.feel.note, d.feel.energy, d.feel.mood, d.feel.focus, d.feel.anxiety, d.feel.meds, d.workout.type, sess, d.workout.minutes, d.workout.effort, d.workout.steps,
+      d.workout.lifts.map(l => `${l.name} ${l.scheme || ''} @ ${fromKg(l.weight)}${U()}${l.note ? ' (' + l.note + ')' : ''}`).join('; '), d.body.flow, d.body.symptoms.join('; ')].map(q).join(',');
+  });
   try { await S.dl.save({ filename: 'baseline-log-' + today() + '.csv', data: cols.join(',') + '\n' + rows.join('\n') }); }
   catch (e) { if (e && e.code === 'unavailable') { S.dl = null; renderHistory(); } }
 }
@@ -767,7 +909,7 @@ async function exportCsv() {
 // ---------- boot ----------
 try { const t = localStorage.getItem('baseline.range'); if (t) S.range = +t; } catch (_) {}
 loadDraft(); renderToday();
-try { const t = localStorage.getItem('baseline.tab'); if (t && t !== 'today') showTab(t); } catch (_) {}
+try { const t = localStorage.getItem('baseline.tab'); if (t && t !== 'today' && $('#' + t)) showTab(t); } catch (_) {}
 
 (async () => {
   const use = n => window.claude && window.claude.use ? window.claude.use(n).catch(() => null) : Promise.resolve(null);
@@ -776,24 +918,28 @@ try { const t = localStorage.getItem('baseline.tab'); if (t && t !== 'today') sh
   if (!db) { setStatus('Open this page signed in to save your log', true); return; }
   S.db = db;
   if (user && (await user.can('data.write')) === false) S.canWrite = false;
+  const formBusy = () => S.dirty || saveTimer || form.contains(document.activeElement);
   db.doc('settings/prefs').onSnapshot(s => {
     if (s.exists) S.prefs = { ...S.prefs, ...s.data() };
-    if (!S.dirty) renderToday(); else renderDerived();
-    if (S.tab === 'history') renderHistory();
-    if (S.tab === 'trends') renderTrends();
+    if (!formBusy()) renderToday(); else renderDerived();
+    renderTab();
+  }, () => {});
+  db.doc('program/main').onSnapshot(s => {
+    if (progTimer) return; // our own edit is pending
+    S.program = s.exists ? clone(s.data()) : null;
+    if (!formBusy()) renderToday();
+    if (S.tab === 'program' && !$('#progBody').contains(document.activeElement)) renderProgram();
+    else if (S.tab !== 'program') renderTab();
   }, () => {});
   db.collection('days').orderBy('date', 'desc').limit(1000).onSnapshot(snap => {
     const m = {}; snap.docs.forEach(d => { m[d.id] = clone(d.data()); });
-    // keep our own unsaved edit for the open day
     if ((S.dirty || saveTimer) && S.draft) m[S.draft.date] = clone(S.draft);
     S.days = m;
     const firstLoad = !S.loaded; S.loaded = true;
     if (firstLoad) setStatus(S.canWrite ? 'Ready' : 'View only');
-    const busy = S.dirty || saveTimer || form.contains(document.activeElement);
     const fresh = getDay(S.cur) || blank(S.cur);
-    if (firstLoad || (!busy && JSON.stringify(fresh) !== JSON.stringify(S.draft))) { S.draft = fresh; renderToday(); }
-    if (S.tab === 'trends') renderTrends();
-    if (S.tab === 'history') renderHistory();
+    if (firstLoad || (!formBusy() && JSON.stringify(fresh) !== JSON.stringify(S.draft))) { S.draft = fresh; renderToday(); }
+    renderTab();
   }, e => setStatus(e.code === 'revoked' ? 'Access to this log changed' : 'Lost connection to your log. Reload to retry.', true));
 })();
 })();
